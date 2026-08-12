@@ -7,14 +7,16 @@ const path = require('node:path');
 const { initDb, seedStopsFromCsv, getAllStopsWithVisited, setVisited, stopExists } = require('./db');
 const { parseStopsCsv } = require('./loadStopsCsv');
 const { loadRoutesAsGeoJson } = require('./loadRoutes');
+const { loadStopRoutes, naturalRouteCompare } = require('./loadStopRoutes');
 const { createWsServer } = require('./ws');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const DB_PATH = path.join(ROOT, 'data.sqlite');
-const STOPS_CSV = path.join(ROOT, 'Data', 'Victoria_Regional_Transit_System_stops.csv');
-const ROUTES_SHP = path.join(ROOT, 'Data', 'Victoria_Regional_Transit_System_routes', 'routes.shp');
-const ROUTES_DBF = path.join(ROOT, 'Data', 'Victoria_Regional_Transit_System_routes', 'routes.dbf');
+const DATA_DIR = path.join(ROOT, 'Data');
+const STOPS_CSV = path.join(DATA_DIR, 'Victoria_Regional_Transit_System_stops.csv');
+const ROUTES_SHP = path.join(DATA_DIR, 'Victoria_Regional_Transit_System_routes', 'routes.shp');
+const ROUTES_DBF = path.join(DATA_DIR, 'Victoria_Regional_Transit_System_routes', 'routes.dbf');
 
 const PORT = process.env.PORT || 3000;
 
@@ -81,16 +83,32 @@ async function main() {
   const routesGeoJson = await loadRoutesAsGeoJson(ROUTES_SHP, ROUTES_DBF);
   console.log(`Loaded ${routesGeoJson.features.length} route shapes`);
 
+  const { routesByStopId, routeLongNameByShortName } = loadStopRoutes(DATA_DIR);
+  console.log(`Derived route associations for ${routesByStopId.size} stops from GTFS data`);
+  const routesMeta = Array.from(routeLongNameByShortName, ([shortName, longName]) => ({
+    shortName,
+    longName,
+  })).sort((a, b) => naturalRouteCompare(a.shortName, b.shortName));
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (req.method === 'GET' && url.pathname === '/api/stops') {
-      sendJson(res, 200, getAllStopsWithVisited(db));
+      const stops = getAllStopsWithVisited(db).map((stop) => ({
+        ...stop,
+        routes: routesByStopId.get(String(stop.stopid)) || [],
+      }));
+      sendJson(res, 200, stops);
       return;
     }
 
     if (req.method === 'GET' && url.pathname === '/api/routes') {
       sendJson(res, 200, routesGeoJson);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/routes-meta') {
+      sendJson(res, 200, routesMeta);
       return;
     }
 

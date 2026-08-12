@@ -28,3 +28,80 @@ html, body {
   margin-left: 10px;
   color: #333;
 }
+
+/* Stop list page */
+
+body.list-page {
+  font-family: sans-serif;
+  font-size: 14px;
+  color: #222;
+}
+
+#list-controls {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: white;
+  padding: 10px 14px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
+}
+
+#search {
+  flex: 0 1 260px;
+  padding: 5px 8px;
+  font-size: 14px;
+}
+
+#stop-list {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 10px 14px 40px;
+}
+
+.route-group-heading {
+  margin: 20px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #ddd;
+  font-size: 15px;
+  font-weight: bold;
+  color: #444;
+}
+
+.stop-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+}
+
+.stop-row:hover {
+  background: #f5f8ff;
+}
+
+.stop-row input[type="checkbox"] {
+  pointer-events: none;
+}
+
+.stop-row .stop-name {
+  flex: 1;
+}
+
+.stop-row.visited .stop-name {
+  color: #2e7d32;
+  font-weight: bold;
+}
+
+.stop-row .stop-muni {
+  color: #888;
+  font-size: 12px;
+}
+
+.empty-message {
+  color: #888;
+  padding: 20px 4px;
+}
