@@ -1,0 +1,137 @@
+'use strict';
+
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const { initDb, seedStopsFromCsv, getAllStopsWithVisited, setVisited, stopExists } = require('./db');
+const { parseStopsCsv } = require('./loadStopsCsv');
+const { loadRoutesAsGeoJson } = require('./loadRoutes');
+const { createWsServer } = require('./ws');
+
+const ROOT = path.join(__dirname, '..');
+const PUBLIC_DIR = path.join(ROOT, 'public');
+const DB_PATH = path.join(ROOT, 'data.sqlite');
+const STOPS_CSV = path.join(ROOT, 'Data', 'Victoria_Regional_Transit_System_stops.csv');
+const ROUTES_SHP = path.join(ROOT, 'Data', 'Victoria_Regional_Transit_System_routes', 'routes.shp');
+const ROUTES_DBF = path.join(ROOT, 'Data', 'Victoria_Regional_Transit_System_routes', 'routes.dbf');
+
+const PORT = process.env.PORT || 3000;
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+};
+
+const VISITED_PATH_RE = /^\/api\/stops\/(\d+)\/visited$/;
+
+function sendJson(res, status, body) {
+  const data = JSON.stringify(body);
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(data);
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+    req.on('end', () => {
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function serveStatic(req, res) {
+  let filePath = req.url === '/' ? '/index.html' : req.url;
+  filePath = path.join(PUBLIC_DIR, path.normalize(filePath));
+
+  if (!filePath.startsWith(PUBLIC_DIR)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
+
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+    const ext = path.extname(filePath);
+    res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
+    res.end(data);
+  });
+}
+
+async function main() {
+  const db = initDb(DB_PATH);
+  const stopRows = parseStopsCsv(STOPS_CSV);
+  seedStopsFromCsv(db, stopRows);
+  console.log(`Seeded ${stopRows.length} stops`);
+
+  const routesGeoJson = await loadRoutesAsGeoJson(ROUTES_SHP, ROUTES_DBF);
+  console.log(`Loaded ${routesGeoJson.features.length} route shapes`);
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+
+    if (req.method === 'GET' && url.pathname === '/api/stops') {
+      sendJson(res, 200, getAllStopsWithVisited(db));
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/routes') {
+      sendJson(res, 200, routesGeoJson);
+      return;
+    }
+
+    const visitedMatch = url.pathname.match(VISITED_PATH_RE);
+    if (req.method === 'POST' && visitedMatch) {
+      const stopid = Number(visitedMatch[1]);
+      readJsonBody(req)
+        .then((body) => {
+          if (!stopExists(db, stopid)) {
+            sendJson(res, 404, { error: 'stop not found' });
+            return;
+          }
+          const visited = Boolean(body.visited);
+          const visitedAt = setVisited(db, stopid, visited);
+          const payload = { type: 'visited-changed', stopid, visited, visitedAt };
+          broadcast(payload);
+          sendJson(res, 200, { stopid, visited, visitedAt });
+        })
+        .catch(() => {
+          sendJson(res, 400, { error: 'invalid JSON body' });
+        });
+      return;
+    }
+
+    if (req.method === 'GET') {
+      serveStatic(req, res);
+      return;
+    }
+
+    res.writeHead(404);
+    res.end('Not found');
+  });
+
+  const { broadcast } = createWsServer(server);
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Listening on http://0.0.0.0:${PORT}`);
+  });
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
