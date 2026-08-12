@@ -11,6 +11,8 @@ const ZOOM_SCALE_RANGE = 8;
 const MAX_ZOOM_SCALE = 6;
 let baseZoom = null;
 
+const POPUP_AUTO_CLOSE_MS = 1200;
+
 const markersByStopId = new Map();
 let routesLayer = null;
 
@@ -79,7 +81,10 @@ function renderStops(stops) {
     const marker = L.circleMarker([stop.latitude, stop.longitude], style);
     marker._visited = stop.visited;
     marker.bindPopup(stop.stopname);
-    marker.on('click', () => toggleVisited(stop.stopid));
+    marker.on('click', () => {
+      toggleVisited(stop.stopid);
+      setTimeout(() => marker.closePopup(), POPUP_AUTO_CLOSE_MS);
+    });
     marker.addTo(map);
     markersByStopId.set(stop.stopid, marker);
     bounds.push([stop.latitude, stop.longitude]);
