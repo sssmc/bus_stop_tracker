@@ -1,7 +1,15 @@
 'use strict';
 
-const STYLE_UNVISITED = { radius: 5, color: '#3388ff', weight: 1, fillColor: '#3388ff', fillOpacity: 0.6 };
-const STYLE_VISITED = { radius: 6, color: '#2e7d32', weight: 1, fillColor: '#4caf50', fillOpacity: 0.9 };
+const BASE_RADIUS_UNVISITED = 5;
+const BASE_RADIUS_VISITED = 6;
+const COLOR_UNVISITED = { color: '#3388ff', weight: 1, fillColor: '#3388ff', fillOpacity: 0.6 };
+const COLOR_VISITED = { color: '#2e7d32', weight: 1, fillColor: '#4caf50', fillOpacity: 0.9 };
+
+// Markers grow up to 9x their base size as you zoom in, reaching full size
+// ZOOM_SCALE_RANGE levels past the initial (zoomed-out, whole-region) view.
+const ZOOM_SCALE_RANGE = 8;
+const MAX_ZOOM_SCALE = 9;
+let baseZoom = null;
 
 const markersByStopId = new Map();
 let routesLayer = null;
@@ -11,8 +19,28 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors',
 }).addTo(map);
 
-function styleFor(visited) {
-  return visited ? STYLE_VISITED : STYLE_UNVISITED;
+function baseRadiusFor(visited) {
+  return visited ? BASE_RADIUS_VISITED : BASE_RADIUS_UNVISITED;
+}
+
+function colorStyleFor(visited) {
+  return visited ? COLOR_VISITED : COLOR_UNVISITED;
+}
+
+function zoomScale(zoom) {
+  if (baseZoom == null) return 1;
+  const t = Math.min(Math.max((zoom - baseZoom) / ZOOM_SCALE_RANGE, 0), 1);
+  return 1 + t * (MAX_ZOOM_SCALE - 1);
+}
+
+function updateMarkerRadius(marker) {
+  marker.setRadius(baseRadiusFor(marker._visited) * zoomScale(map.getZoom()));
+}
+
+function updateAllMarkerRadii() {
+  for (const marker of markersByStopId.values()) {
+    updateMarkerRadius(marker);
+  }
 }
 
 function updateStats() {
@@ -28,7 +56,8 @@ function applyVisitedChange(stopid, visited) {
   const marker = markersByStopId.get(stopid);
   if (!marker) return;
   marker._visited = visited;
-  marker.setStyle(styleFor(visited));
+  marker.setStyle(colorStyleFor(visited));
+  updateMarkerRadius(marker);
   updateStats();
 }
 
@@ -46,7 +75,8 @@ function toggleVisited(stopid) {
 function renderStops(stops) {
   const bounds = [];
   for (const stop of stops) {
-    const marker = L.circleMarker([stop.latitude, stop.longitude], styleFor(stop.visited));
+    const style = { radius: baseRadiusFor(stop.visited), ...colorStyleFor(stop.visited) };
+    const marker = L.circleMarker([stop.latitude, stop.longitude], style);
     marker._visited = stop.visited;
     marker.bindPopup(stop.stopname);
     marker.on('click', () => toggleVisited(stop.stopid));
@@ -57,6 +87,8 @@ function renderStops(stops) {
   if (bounds.length > 0) {
     map.fitBounds(bounds);
   }
+  baseZoom = map.getZoom();
+  map.on('zoomend', updateAllMarkerRadii);
   updateStats();
 }
 
