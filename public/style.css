@@ -68,6 +68,26 @@ body.list-page {
   font-size: 15px;
   font-weight: bold;
   color: #444;
+  cursor: pointer;
+  user-select: none;
+}
+
+.route-group-heading::before {
+  content: '▸ ';
+  display: inline-block;
+  width: 14px;
+}
+
+.route-group.expanded .route-group-heading::before {
+  content: '▾ ';
+}
+
+.route-group-rows {
+  display: none;
+}
+
+.route-group.expanded .route-group-rows {
+  display: block;
 }
 
 .stop-row {

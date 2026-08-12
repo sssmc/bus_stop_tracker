@@ -45,6 +45,27 @@ function matchesSearch(stop, query) {
   return !query || stop.stopname.toLowerCase().includes(query);
 }
 
+function buildRouteGroup(title, stops) {
+  if (stops.length === 0) return;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'route-group';
+
+  const heading = document.createElement('div');
+  heading.className = 'route-group-heading';
+  heading.textContent = `${title} (${stops.length})`;
+  heading.addEventListener('click', () => wrapper.classList.toggle('expanded'));
+
+  const rows = document.createElement('div');
+  rows.className = 'route-group-rows';
+  for (const stop of stops) {
+    rows.appendChild(createStopRow(stop));
+  }
+
+  wrapper.append(heading, rows);
+  listContainer.appendChild(wrapper);
+}
+
 function render() {
   const query = searchInput.value.trim().toLowerCase();
   const grouped = groupToggle.checked;
@@ -76,30 +97,13 @@ function render() {
     const stopsOnRoute = filtered
       .filter((stop) => stop.routes.includes(route.shortName))
       .sort((a, b) => a.stopname.localeCompare(b.stopname));
-    if (stopsOnRoute.length === 0) continue;
-
-    const heading = document.createElement('div');
-    heading.className = 'route-group-heading';
-    heading.textContent = `Route ${route.shortName} — ${route.longName}`;
-    listContainer.appendChild(heading);
-
-    for (const stop of stopsOnRoute) {
-      listContainer.appendChild(createStopRow(stop));
-    }
+    buildRouteGroup(`Route ${route.shortName} — ${route.longName}`, stopsOnRoute);
   }
 
   const unassigned = filtered
     .filter((stop) => stop.routes.length === 0)
     .sort((a, b) => a.stopname.localeCompare(b.stopname));
-  if (unassigned.length > 0) {
-    const heading = document.createElement('div');
-    heading.className = 'route-group-heading';
-    heading.textContent = 'Unassigned';
-    listContainer.appendChild(heading);
-    for (const stop of unassigned) {
-      listContainer.appendChild(createStopRow(stop));
-    }
-  }
+  buildRouteGroup('Unassigned', unassigned);
 
   updateStats(filtered.length);
 }
