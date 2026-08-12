@@ -78,6 +78,14 @@ body.list-page {
   width: 14px;
 }
 
+.route-group.group-partial .route-group-heading {
+  color: #b8860b;
+}
+
+.route-group.group-all .route-group-heading {
+  color: #2e7d32;
+}
+
 .route-group.expanded .route-group-heading::before {
   content: '▾ ';
 }

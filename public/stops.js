@@ -1,8 +1,10 @@
 'use strict';
 
 let allStops = [];
+let allStopsById = new Map();
 let routesMeta = [];
 const rowsByStopId = new Map();
+let routeGroups = []; // { wrapper, heading, baseTitle, stopIds }
 
 const searchInput = document.getElementById('search');
 const groupToggle = document.getElementById('toggle-group');
@@ -45,6 +47,22 @@ function matchesSearch(stop, query) {
   return !query || stop.stopname.toLowerCase().includes(query);
 }
 
+function updateGroupHeading(group) {
+  const stopsInGroup = group.stopIds.map((id) => allStopsById.get(id)).filter(Boolean);
+  const total = stopsInGroup.length;
+  const visitedCount = stopsInGroup.filter((s) => s.visited).length;
+
+  group.heading.textContent = `${group.baseTitle} (${visitedCount}/${total})`;
+  group.wrapper.classList.remove('group-none', 'group-partial', 'group-all');
+  if (visitedCount === 0) {
+    group.wrapper.classList.add('group-none');
+  } else if (visitedCount === total) {
+    group.wrapper.classList.add('group-all');
+  } else {
+    group.wrapper.classList.add('group-partial');
+  }
+}
+
 function buildRouteGroup(title, stops) {
   if (stops.length === 0) return;
 
@@ -53,7 +71,6 @@ function buildRouteGroup(title, stops) {
 
   const heading = document.createElement('div');
   heading.className = 'route-group-heading';
-  heading.textContent = `${title} (${stops.length})`;
   heading.addEventListener('click', () => wrapper.classList.toggle('expanded'));
 
   const rows = document.createElement('div');
@@ -64,6 +81,10 @@ function buildRouteGroup(title, stops) {
 
   wrapper.append(heading, rows);
   listContainer.appendChild(wrapper);
+
+  const group = { wrapper, heading, baseTitle: title, stopIds: stops.map((s) => s.stopid) };
+  routeGroups.push(group);
+  updateGroupHeading(group);
 }
 
 function render() {
@@ -71,6 +92,7 @@ function render() {
   const grouped = groupToggle.checked;
 
   rowsByStopId.clear();
+  routeGroups = [];
   listContainer.innerHTML = '';
 
   const filtered = allStops.filter((stop) => matchesSearch(stop, query));
@@ -111,12 +133,13 @@ function render() {
 function updateStats(filteredCount) {
   const visitedCount = allStops.filter((s) => s.visited).length;
   const total = allStops.length;
+  const percent = total > 0 ? ((visitedCount / total) * 100).toFixed(1) : '0.0';
   const showing = filteredCount === total ? '' : ` (showing ${filteredCount})`;
-  document.getElementById('stats').textContent = `${visitedCount} / ${total} visited${showing}`;
+  document.getElementById('stats').textContent = `${visitedCount} / ${total} visited (${percent}%)${showing}`;
 }
 
 function applyVisitedChange(stopid, visited) {
-  const stop = allStops.find((s) => s.stopid === stopid);
+  const stop = allStopsById.get(stopid);
   if (stop) stop.visited = visited;
 
   const rows = rowsByStopId.get(stopid) || [];
@@ -124,14 +147,24 @@ function applyVisitedChange(stopid, visited) {
     row.classList.toggle('visited', visited);
     row.querySelector('input[type="checkbox"]').checked = visited;
   }
+
+  for (const group of routeGroups) {
+    if (group.stopIds.includes(stopid)) updateGroupHeading(group);
+  }
+
   updateStats(listContainer.querySelectorAll('.stop-row').length);
+}
+
+function setAllStops(stops) {
+  allStops = stops;
+  allStopsById = new Map(stops.map((s) => [s.stopid, s]));
 }
 
 function resyncStops() {
   fetch('/api/stops')
     .then((res) => res.json())
     .then((stops) => {
-      allStops = stops;
+      setAllStops(stops);
       render();
     })
     .catch((err) => console.error('Failed to resync stops', err));
@@ -165,7 +198,7 @@ Promise.all([
   fetch('/api/stops').then((res) => res.json()),
   fetch('/api/routes-meta').then((res) => res.json()),
 ]).then(([stops, meta]) => {
-  allStops = stops;
+  setAllStops(stops);
   routesMeta = meta;
   render();
   connectWebSocket();
