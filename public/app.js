@@ -5,10 +5,10 @@ const BASE_RADIUS_VISITED = 6;
 const COLOR_UNVISITED = { color: '#3388ff', weight: 1, fillColor: '#3388ff', fillOpacity: 0.6 };
 const COLOR_VISITED = { color: '#2e7d32', weight: 1, fillColor: '#4caf50', fillOpacity: 0.9 };
 
-// Markers grow up to 9x their base size as you zoom in, reaching full size
+// Markers grow up to 6x their base size as you zoom in, reaching full size
 // ZOOM_SCALE_RANGE levels past the initial (zoomed-out, whole-region) view.
 const ZOOM_SCALE_RANGE = 8;
-const MAX_ZOOM_SCALE = 9;
+const MAX_ZOOM_SCALE = 6;
 let baseZoom = null;
 
 const markersByStopId = new Map();
