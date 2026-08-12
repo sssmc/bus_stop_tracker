@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const { initDb, seedStopsFromCsv, getAllStopsWithVisited, setVisited, stopExists } = require('./db');
 const { parseStopsCsv } = require('./loadStopsCsv');
-const { loadRoutesAsGeoJson } = require('./loadRoutes');
+const { loadRouteLines } = require('./loadRouteLines');
 const { loadStopRoutes, naturalRouteCompare } = require('./loadStopRoutes');
 const { createWsServer } = require('./ws');
 
@@ -15,8 +15,6 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const DB_PATH = path.join(ROOT, 'data.sqlite');
 const DATA_DIR = path.join(ROOT, 'Data');
 const STOPS_CSV = path.join(DATA_DIR, 'Victoria_Regional_Transit_System_stops.csv');
-const ROUTES_SHP = path.join(DATA_DIR, 'Victoria_Regional_Transit_System_routes', 'routes.shp');
-const ROUTES_DBF = path.join(DATA_DIR, 'Victoria_Regional_Transit_System_routes', 'routes.dbf');
 
 const PORT = process.env.PORT || 3000;
 
@@ -80,8 +78,8 @@ async function main() {
   seedStopsFromCsv(db, stopRows);
   console.log(`Seeded ${stopRows.length} stops`);
 
-  const routesGeoJson = await loadRoutesAsGeoJson(ROUTES_SHP, ROUTES_DBF);
-  console.log(`Loaded ${routesGeoJson.features.length} route shapes`);
+  const routesGeoJson = loadRouteLines(DATA_DIR);
+  console.log(`Loaded and bundled ${routesGeoJson.features.length} route shapes`);
 
   const { routesByStopId, routeLongNameByShortName } = loadStopRoutes(DATA_DIR);
   console.log(`Derived route associations for ${routesByStopId.size} stops from GTFS data`);

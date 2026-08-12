@@ -130,7 +130,11 @@ function connectWebSocket() {
 }
 
 function setupRoutesToggle(geojson) {
-  routesLayer = L.geoJSON(geojson, { style: { color: '#e65100', weight: 2, opacity: 0.7 } });
+  routesLayer = L.geoJSON(geojson, {
+    renderer: L.canvas(),
+    style: (feature) => ({ color: feature.properties.color, weight: 3, opacity: 0.85 }),
+  });
+  routesLayer.eachLayer((layer) => layer.bindTooltip(`Route ${layer.feature.properties.route}`));
   document.getElementById('toggle-routes').addEventListener('change', (event) => {
     if (event.target.checked) {
       routesLayer.addTo(map);
