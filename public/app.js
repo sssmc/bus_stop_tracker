@@ -11,6 +11,36 @@ const ZOOM_SCALE_RANGE = 8;
 const MAX_ZOOM_SCALE = 6;
 let baseZoom = null;
 
+// Route lines are widest at the zoomed-out region view (where they're otherwise
+// easy to miss) and taper down to a normal weight as you zoom in.
+const ROUTE_WEIGHT_MAX = 15;
+const ROUTE_WEIGHT_MIN = 4;
+const ROUTE_WEIGHT_ZOOM_RANGE = 6;
+
+function routeWeightForZoom(zoom) {
+  if (baseZoom == null) return ROUTE_WEIGHT_MIN;
+  const t = Math.min(Math.max((zoom - baseZoom) / ROUTE_WEIGHT_ZOOM_RANGE, 0), 1);
+  return ROUTE_WEIGHT_MAX - t * (ROUTE_WEIGHT_MAX - ROUTE_WEIGHT_MIN);
+}
+
+// At low zoom, routes are drawn thick to stay visible, so they need to sit above
+// the (comparatively tiny) stop markers or they'd be hidden underneath them. Once
+// zoomed in past this (shorter than the weight taper) range, routes go back below
+// markers so clicking a stop stays reliable even where a route passes through it.
+const ROUTE_ZORDER_ZOOM_RANGE = 2;
+
+function isLowZoom(zoom) {
+  return baseZoom != null && zoom < baseZoom + ROUTE_ZORDER_ZOOM_RANGE;
+}
+
+function applyRouteZOrder(layer, zoom) {
+  if (isLowZoom(zoom)) {
+    layer.bringToFront();
+  } else {
+    layer.bringToBack();
+  }
+}
+
 const POPUP_AUTO_CLOSE_MS = 1200;
 
 const markersByStopId = new Map();
@@ -136,15 +166,26 @@ function buildRouteLayers(geojson) {
     featuresByRoute.get(route).push(feature);
   }
 
+  const initialWeight = routeWeightForZoom(map.getZoom());
   const layersByRoute = new Map();
   for (const [route, features] of featuresByRoute) {
     const layer = L.geoJSON(
       { type: 'FeatureCollection', features },
-      { style: (feature) => ({ color: feature.properties.color, weight: 3, opacity: 0.85 }) }
+      { style: (feature) => ({ color: feature.properties.color, weight: initialWeight, opacity: 0.85 }) }
     );
     layer.eachLayer((l) => l.bindTooltip(`Route ${route}`));
     layersByRoute.set(route, layer);
   }
+
+  map.on('zoomend', () => {
+    const zoom = map.getZoom();
+    const weight = routeWeightForZoom(zoom);
+    for (const layer of layersByRoute.values()) {
+      layer.setStyle({ weight });
+      if (map.hasLayer(layer)) applyRouteZOrder(layer, zoom);
+    }
+  });
+
   return layersByRoute;
 }
 
@@ -170,7 +211,7 @@ function setupRouteSidebar(routesMeta, layersByRoute) {
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) {
         layer.addTo(map);
-        layer.bringToBack();
+        applyRouteZOrder(layer, map.getZoom());
       } else {
         map.removeLayer(layer);
       }
