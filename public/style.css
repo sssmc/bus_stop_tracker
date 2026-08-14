@@ -109,10 +109,16 @@ html, body {
 }
 
 .route-color-swatch {
+  display: inline-block;
   width: 14px;
   height: 14px;
   border-radius: 3px;
   flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.route-group-heading .route-color-swatch {
+  margin-right: 6px;
 }
 
 .route-item .route-label {

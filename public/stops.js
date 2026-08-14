@@ -52,7 +52,7 @@ function updateGroupHeading(group) {
   const total = stopsInGroup.length;
   const visitedCount = stopsInGroup.filter((s) => s.visited).length;
 
-  group.heading.textContent = `${group.baseTitle} (${visitedCount}/${total})`;
+  group.headingText.textContent = `${group.baseTitle} (${visitedCount}/${total})`;
   group.wrapper.classList.remove('group-none', 'group-partial', 'group-all');
   if (visitedCount === 0) {
     group.wrapper.classList.add('group-none');
@@ -63,7 +63,7 @@ function updateGroupHeading(group) {
   }
 }
 
-function buildRouteGroup(title, stops) {
+function buildRouteGroup(title, stops, color) {
   if (stops.length === 0) return;
 
   const wrapper = document.createElement('div');
@@ -72,6 +72,15 @@ function buildRouteGroup(title, stops) {
   const heading = document.createElement('div');
   heading.className = 'route-group-heading';
   heading.addEventListener('click', () => wrapper.classList.toggle('expanded'));
+
+  if (color) {
+    const swatch = document.createElement('span');
+    swatch.className = 'route-color-swatch';
+    swatch.style.background = color;
+    heading.appendChild(swatch);
+  }
+  const headingText = document.createElement('span');
+  heading.appendChild(headingText);
 
   const rows = document.createElement('div');
   rows.className = 'route-group-rows';
@@ -82,7 +91,7 @@ function buildRouteGroup(title, stops) {
   wrapper.append(heading, rows);
   listContainer.appendChild(wrapper);
 
-  const group = { wrapper, heading, baseTitle: title, stopIds: stops.map((s) => s.stopid) };
+  const group = { wrapper, heading, headingText, baseTitle: title, stopIds: stops.map((s) => s.stopid) };
   routeGroups.push(group);
   updateGroupHeading(group);
 }
@@ -119,7 +128,7 @@ function render() {
     const stopsOnRoute = filtered
       .filter((stop) => stop.routes.includes(route.shortName))
       .sort((a, b) => a.stopname.localeCompare(b.stopname));
-    buildRouteGroup(`Route ${route.shortName} — ${route.longName}`, stopsOnRoute);
+    buildRouteGroup(`Route ${route.shortName} — ${route.longName}`, stopsOnRoute, route.color);
   }
 
   const unassigned = filtered
