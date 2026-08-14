@@ -161,6 +161,8 @@ body.list-page {
 }
 
 .route-group-heading {
+  display: flex;
+  align-items: center;
   margin: 20px 0 6px;
   padding-bottom: 4px;
   border-bottom: 1px solid #ddd;
@@ -175,6 +177,24 @@ body.list-page {
   content: '▸ ';
   display: inline-block;
   width: 14px;
+}
+
+.route-group-heading-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ridden-toggle {
+  margin-left: auto;
+  padding-left: 10px;
+  font-size: 13px;
+  font-weight: normal;
+  color: #444;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .route-group.group-partial .route-group-heading {

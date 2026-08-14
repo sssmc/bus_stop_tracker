@@ -4,7 +4,15 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { initDb, seedStopsFromCsv, getAllStopsWithVisited, setVisited, stopExists } = require('./db');
+const {
+  initDb,
+  seedStopsFromCsv,
+  getAllStopsWithVisited,
+  setVisited,
+  stopExists,
+  getRiddenRouteNames,
+  setRouteRidden,
+} = require('./db');
 const { parseStopsCsv } = require('./loadStopsCsv');
 const { loadRouteLines, loadRawRouteLines } = require('./loadRouteLines');
 const { loadStopRoutes, naturalRouteCompare } = require('./loadStopRoutes');
@@ -25,6 +33,7 @@ const MIME_TYPES = {
 };
 
 const VISITED_PATH_RE = /^\/api\/stops\/(\d+)\/visited$/;
+const ROUTE_RIDDEN_PATH_RE = /^\/api\/routes\/([^/]+)\/ridden$/;
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
@@ -86,11 +95,12 @@ async function main() {
 
   const { routesByStopId, routeLongNameByShortName } = loadStopRoutes(DATA_DIR);
   console.log(`Derived route associations for ${routesByStopId.size} stops from GTFS data`);
-  const routesMeta = Array.from(routeLongNameByShortName, ([shortName, longName]) => ({
+  const routesMetaBase = Array.from(routeLongNameByShortName, ([shortName, longName]) => ({
     shortName,
     longName,
     color: colorByShortName.get(shortName) || '#999999',
   })).sort((a, b) => naturalRouteCompare(a.shortName, b.shortName));
+  const routeShortNames = new Set(routesMetaBase.map((r) => r.shortName));
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -115,6 +125,11 @@ async function main() {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/routes-meta') {
+      const riddenRouteNames = getRiddenRouteNames(db);
+      const routesMeta = routesMetaBase.map((route) => ({
+        ...route,
+        ridden: riddenRouteNames.has(route.shortName),
+      }));
       sendJson(res, 200, routesMeta);
       return;
     }
@@ -133,6 +148,27 @@ async function main() {
           const payload = { type: 'visited-changed', stopid, visited, visitedAt };
           broadcast(payload);
           sendJson(res, 200, { stopid, visited, visitedAt });
+        })
+        .catch(() => {
+          sendJson(res, 400, { error: 'invalid JSON body' });
+        });
+      return;
+    }
+
+    const riddenMatch = url.pathname.match(ROUTE_RIDDEN_PATH_RE);
+    if (req.method === 'POST' && riddenMatch) {
+      const shortName = decodeURIComponent(riddenMatch[1]);
+      readJsonBody(req)
+        .then((body) => {
+          if (!routeShortNames.has(shortName)) {
+            sendJson(res, 404, { error: 'route not found' });
+            return;
+          }
+          const ridden = Boolean(body.ridden);
+          const riddenAt = setRouteRidden(db, shortName, ridden);
+          const payload = { type: 'route-ridden-changed', shortName, ridden, riddenAt };
+          broadcast(payload);
+          sendJson(res, 200, { shortName, ridden, riddenAt });
         })
         .catch(() => {
           sendJson(res, 400, { error: 'invalid JSON body' });

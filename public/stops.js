@@ -3,8 +3,10 @@
 let allStops = [];
 let allStopsById = new Map();
 let routesMeta = [];
+let routesMetaByShortName = new Map();
 const rowsByStopId = new Map();
 let routeGroups = []; // { wrapper, heading, baseTitle, stopIds }
+let riddenCheckboxByRoute = new Map();
 
 const searchInput = document.getElementById('search');
 const groupToggle = document.getElementById('toggle-group');
@@ -16,6 +18,14 @@ function toggleVisited(stopid, currentlyVisited) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ visited: !currentlyVisited }),
   }).catch((err) => console.error('Failed to update visited state', err));
+}
+
+function setRidden(shortName, ridden) {
+  fetch(`/api/routes/${encodeURIComponent(shortName)}/ridden`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ridden }),
+  }).catch((err) => console.error('Failed to update ridden state', err));
 }
 
 function createStopRow(stop) {
@@ -63,7 +73,7 @@ function updateGroupHeading(group) {
   }
 }
 
-function buildRouteGroup(title, stops, color) {
+function buildRouteGroup(title, stops, route) {
   if (stops.length === 0) return;
 
   const wrapper = document.createElement('div');
@@ -73,14 +83,39 @@ function buildRouteGroup(title, stops, color) {
   heading.className = 'route-group-heading';
   heading.addEventListener('click', () => wrapper.classList.toggle('expanded'));
 
-  if (color) {
+  if (route) {
     const swatch = document.createElement('span');
     swatch.className = 'route-color-swatch';
-    swatch.style.background = color;
+    swatch.style.background = route.color;
     heading.appendChild(swatch);
   }
   const headingText = document.createElement('span');
+  headingText.className = 'route-group-heading-text';
   heading.appendChild(headingText);
+
+  if (route) {
+    const riddenLabel = document.createElement('label');
+    riddenLabel.className = 'ridden-toggle';
+    riddenLabel.title = 'Mark this route as ridden';
+
+    const riddenCheckbox = document.createElement('input');
+    riddenCheckbox.type = 'checkbox';
+    riddenCheckbox.checked = route.ridden;
+
+    riddenLabel.append(riddenCheckbox, document.createTextNode(' Ridden'));
+    riddenLabel.addEventListener('click', (event) => {
+      // Stay in sync via the WebSocket echo (like stop visits) rather than
+      // toggling optimistically, so the checkbox always reflects server state.
+      // Read route.ridden (our own tracked state), not checkbox.checked: clicking
+      // the checkbox directly flips checkbox.checked natively before this handler
+      // runs, so checkbox.checked can't be trusted as "the value before this click".
+      event.stopPropagation();
+      event.preventDefault();
+      setRidden(route.shortName, !route.ridden);
+    });
+    heading.appendChild(riddenLabel);
+    riddenCheckboxByRoute.set(route.shortName, riddenCheckbox);
+  }
 
   const rows = document.createElement('div');
   rows.className = 'route-group-rows';
@@ -102,6 +137,7 @@ function render() {
 
   rowsByStopId.clear();
   routeGroups = [];
+  riddenCheckboxByRoute.clear();
   listContainer.innerHTML = '';
 
   const filtered = allStops.filter((stop) => matchesSearch(stop, query));
@@ -128,13 +164,13 @@ function render() {
     const stopsOnRoute = filtered
       .filter((stop) => stop.routes.includes(route.shortName))
       .sort((a, b) => a.stopname.localeCompare(b.stopname));
-    buildRouteGroup(`Route ${route.shortName} — ${route.longName}`, stopsOnRoute, route.color);
+    buildRouteGroup(`Route ${route.shortName} — ${route.longName}`, stopsOnRoute, route);
   }
 
   const unassigned = filtered
     .filter((stop) => stop.routes.length === 0)
     .sort((a, b) => a.stopname.localeCompare(b.stopname));
-  buildRouteGroup('Unassigned', unassigned);
+  buildRouteGroup('Unassigned', unassigned, null);
 
   updateStats(filtered.length);
 }
@@ -144,7 +180,12 @@ function updateStats(filteredCount) {
   const total = allStops.length;
   const percent = total > 0 ? ((visitedCount / total) * 100).toFixed(1) : '0.0';
   const showing = filteredCount === total ? '' : ` (showing ${filteredCount})`;
-  document.getElementById('stats').textContent = `${visitedCount} / ${total} visited (${percent}%)${showing}`;
+
+  const riddenCount = routesMeta.filter((r) => r.ridden).length;
+  const routeTotal = routesMeta.length;
+
+  document.getElementById('stats').textContent =
+    `${visitedCount} / ${total} visited (${percent}%)${showing} · ${riddenCount} / ${routeTotal} routes ridden`;
 }
 
 function applyVisitedChange(stopid, visited) {
@@ -164,19 +205,34 @@ function applyVisitedChange(stopid, visited) {
   updateStats(listContainer.querySelectorAll('.stop-row').length);
 }
 
+function applyRiddenChange(shortName, ridden) {
+  const route = routesMetaByShortName.get(shortName);
+  if (route) route.ridden = ridden;
+
+  const checkbox = riddenCheckboxByRoute.get(shortName);
+  if (checkbox) checkbox.checked = ridden;
+
+  updateStats(listContainer.querySelectorAll('.stop-row').length);
+}
+
 function setAllStops(stops) {
   allStops = stops;
   allStopsById = new Map(stops.map((s) => [s.stopid, s]));
 }
 
-function resyncStops() {
-  fetch('/api/stops')
-    .then((res) => res.json())
-    .then((stops) => {
+function setRoutesMeta(meta) {
+  routesMeta = meta;
+  routesMetaByShortName = new Map(meta.map((r) => [r.shortName, r]));
+}
+
+function resync() {
+  Promise.all([fetch('/api/stops').then((res) => res.json()), fetch('/api/routes-meta').then((res) => res.json())])
+    .then(([stops, meta]) => {
       setAllStops(stops);
+      setRoutesMeta(meta);
       render();
     })
-    .catch((err) => console.error('Failed to resync stops', err));
+    .catch((err) => console.error('Failed to resync', err));
 }
 
 function connectWebSocket() {
@@ -187,13 +243,15 @@ function connectWebSocket() {
     const msg = JSON.parse(event.data);
     if (msg.type === 'visited-changed') {
       applyVisitedChange(msg.stopid, msg.visited);
+    } else if (msg.type === 'route-ridden-changed') {
+      applyRiddenChange(msg.shortName, msg.ridden);
     }
   });
 
   ws.addEventListener('close', () => {
     setTimeout(() => {
       connectWebSocket();
-      resyncStops();
+      resync();
     }, 3000);
   });
 
@@ -208,7 +266,7 @@ Promise.all([
   fetch('/api/routes-meta').then((res) => res.json()),
 ]).then(([stops, meta]) => {
   setAllStops(stops);
-  routesMeta = meta;
+  setRoutesMeta(meta);
   render();
   connectWebSocket();
 });

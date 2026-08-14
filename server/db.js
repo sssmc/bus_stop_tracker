@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS visited (
   stopid     INTEGER PRIMARY KEY REFERENCES stops(stopid),
   visited_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ridden_routes (
+  route_short_name TEXT PRIMARY KEY,
+  ridden_at        TEXT NOT NULL
+);
 `;
 
 function initDb(dbPath) {
@@ -92,4 +97,34 @@ function stopExists(db, stopid) {
   return db.prepare('SELECT 1 FROM stops WHERE stopid = ?').get(stopid) != null;
 }
 
-module.exports = { initDb, seedStopsFromCsv, getAllStopsWithVisited, setVisited, stopExists };
+function getRiddenRouteNames(db) {
+  return new Set(
+    db
+      .prepare('SELECT route_short_name FROM ridden_routes')
+      .all()
+      .map((row) => row.route_short_name)
+  );
+}
+
+function setRouteRidden(db, shortName, ridden) {
+  if (ridden) {
+    const riddenAt = new Date().toISOString();
+    db.prepare('INSERT OR REPLACE INTO ridden_routes (route_short_name, ridden_at) VALUES (?, ?)').run(
+      shortName,
+      riddenAt
+    );
+    return riddenAt;
+  }
+  db.prepare('DELETE FROM ridden_routes WHERE route_short_name = ?').run(shortName);
+  return null;
+}
+
+module.exports = {
+  initDb,
+  seedStopsFromCsv,
+  getAllStopsWithVisited,
+  setVisited,
+  stopExists,
+  getRiddenRouteNames,
+  setRouteRidden,
+};
