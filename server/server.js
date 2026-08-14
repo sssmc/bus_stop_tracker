@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('node:http');
+const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -23,8 +24,21 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const DB_PATH = path.join(ROOT, 'data.sqlite');
 const DATA_DIR = path.join(ROOT, 'Data');
 const STOPS_CSV = path.join(DATA_DIR, 'Victoria_Regional_Transit_System_stops.csv');
+const CERTS_DIR = path.join(ROOT, 'certs');
+const TLS_KEY_PATH = path.join(CERTS_DIR, 'key.pem');
+const TLS_CERT_PATH = path.join(CERTS_DIR, 'cert.pem');
 
 const PORT = process.env.PORT || 3000;
+
+// Browser geolocation (used for the live user-location feature) only works over
+// a secure context, so we serve HTTPS whenever a cert/key pair is present in
+// certs/ — self-signed for local/LAN use today, swap in a real cert (e.g. from
+// Let's Encrypt) at the same paths for a production deployment. Falls back to
+// plain HTTP if no cert is found, so this still runs with zero setup.
+function loadTlsOptions() {
+  if (!fs.existsSync(TLS_KEY_PATH) || !fs.existsSync(TLS_CERT_PATH)) return null;
+  return { key: fs.readFileSync(TLS_KEY_PATH), cert: fs.readFileSync(TLS_CERT_PATH) };
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -102,7 +116,8 @@ async function main() {
   })).sort((a, b) => naturalRouteCompare(a.shortName, b.shortName));
   const routeShortNames = new Set(routesMetaBase.map((r) => r.shortName));
 
-  const server = http.createServer((req, res) => {
+  const tlsOptions = loadTlsOptions();
+  const requestHandler = (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (req.method === 'GET' && url.pathname === '/api/stops') {
@@ -183,12 +198,17 @@ async function main() {
 
     res.writeHead(404);
     res.end('Not found');
-  });
+  };
+
+  const server = tlsOptions
+    ? https.createServer(tlsOptions, requestHandler)
+    : http.createServer(requestHandler);
 
   const { broadcast } = createWsServer(server);
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Listening on http://0.0.0.0:${PORT}`);
+    const scheme = tlsOptions ? 'https' : 'http';
+    console.log(`Listening on ${scheme}://0.0.0.0:${PORT}${tlsOptions ? '' : ' (no TLS cert found in certs/ — geolocation will only work on localhost)'}`);
   });
 }
 

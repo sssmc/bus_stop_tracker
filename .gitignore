@@ -5,3 +5,6 @@ data.sqlite
 # Raw GTFS feed extracts (100MB+ stop_times.txt exceeds GitHub's file size limit).
 # The app reads whichever one of these is present locally at startup for route data.
 Data/*_gtfs_*/
+
+# TLS cert/key (self-signed locally; a real cert in production). Never commit keys.
+certs/

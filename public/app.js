@@ -62,6 +62,10 @@ const POPUP_AUTO_CLOSE_MS = 1200;
 
 const markersByStopId = new Map();
 
+let activeWs = null;
+let myClientId = null;
+const userLocationMarkers = new Map(); // clientId -> L.CircleMarker
+
 const map = L.map('map', { renderer: L.canvas() });
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors',
@@ -156,18 +160,86 @@ function resyncStops() {
     .catch((err) => console.error('Failed to resync stops', err));
 }
 
+const SELF_LOCATION_COLOR = '#e53935';
+const SELF_LOCATION_RADIUS = 12;
+const OTHER_LOCATION_RADIUS = 8;
+
+function upsertUserLocationMarker(clientId, lat, lon, color) {
+  const isSelf = clientId === myClientId;
+  const style = {
+    radius: isSelf ? SELF_LOCATION_RADIUS : OTHER_LOCATION_RADIUS,
+    color: '#ffffff',
+    weight: 2,
+    fillColor: isSelf ? SELF_LOCATION_COLOR : color,
+    fillOpacity: 0.95,
+  };
+
+  let marker = userLocationMarkers.get(clientId);
+  if (!marker) {
+    marker = L.circleMarker([lat, lon], style);
+    marker.addTo(map);
+    userLocationMarkers.set(clientId, marker);
+  } else {
+    marker.setLatLng([lat, lon]);
+    marker.setStyle(style);
+  }
+  marker.bindTooltip(isSelf ? 'You' : 'Live user', { sticky: true });
+  marker.bringToFront();
+}
+
+function removeUserLocationMarker(clientId) {
+  const marker = userLocationMarkers.get(clientId);
+  if (marker) {
+    map.removeLayer(marker);
+    userLocationMarkers.delete(clientId);
+  }
+}
+
+function clearUserLocationMarkers() {
+  for (const marker of userLocationMarkers.values()) map.removeLayer(marker);
+  userLocationMarkers.clear();
+}
+
+function shareLocationOverWebSocket() {
+  if (!('geolocation' in navigator)) return;
+  navigator.geolocation.watchPosition(
+    (position) => {
+      if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+        activeWs.send(
+          JSON.stringify({
+            type: 'location-update',
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+          })
+        );
+      }
+    },
+    (err) => console.warn('Geolocation unavailable:', err.message),
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+  );
+}
+
 function connectWebSocket() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${protocol}//${location.host}`);
+  activeWs = ws;
 
   ws.addEventListener('message', (event) => {
     const msg = JSON.parse(event.data);
     if (msg.type === 'visited-changed') {
       applyVisitedChange(msg.stopid, msg.visited);
+    } else if (msg.type === 'hello') {
+      myClientId = msg.clientId;
+    } else if (msg.type === 'user-location') {
+      upsertUserLocationMarker(msg.clientId, msg.lat, msg.lon, msg.color);
+    } else if (msg.type === 'user-left') {
+      removeUserLocationMarker(msg.clientId);
     }
   });
 
   ws.addEventListener('close', () => {
+    clearUserLocationMarkers();
+    myClientId = null;
     setTimeout(() => {
       connectWebSocket();
       resyncStops();
@@ -365,4 +437,5 @@ Promise.all([
   renderStops(stops);
   setupRoutes(routesMeta, routesGeoJson, routesRawGeoJson);
   connectWebSocket();
+  shareLocationOverWebSocket();
 });
