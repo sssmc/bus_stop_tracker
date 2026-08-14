@@ -13,7 +13,7 @@ let baseZoom = null;
 
 // Route lines are widest at the zoomed-out region view (where they're otherwise
 // easy to miss) and taper down to a normal weight as you zoom in.
-const ROUTE_WEIGHT_MAX = 15;
+const ROUTE_WEIGHT_MAX = 11;
 const ROUTE_WEIGHT_MIN = 4;
 const ROUTE_WEIGHT_ZOOM_RANGE = 6;
 

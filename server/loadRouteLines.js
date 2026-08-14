@@ -138,14 +138,18 @@ function perpendicularUnit(prev, next) {
   return [-dy / len, dx / len];
 }
 
-// Auto-generates visually distinct colors spread evenly around the hue wheel,
-// one per route, in a stable (natural sort) order so colors don't shuffle
-// between server restarts.
+// Auto-generates visually distinct colors, one per route, in a stable (natural
+// sort) order so colors don't shuffle between server restarts. Hues are spaced
+// by the golden angle (~137.5°) rather than evenly (360/N) so that adjacent
+// route numbers — which are often physically close to each other — don't end
+// up with similar-looking adjacent hues.
+const GOLDEN_ANGLE_DEGREES = 137.508;
+
 function assignRouteColors(routeShortNames) {
   const sorted = Array.from(routeShortNames).sort(naturalRouteCompare);
   const colorByShortName = new Map();
   sorted.forEach((name, i) => {
-    const hue = Math.round((i / sorted.length) * 360);
+    const hue = Math.round((i * GOLDEN_ANGLE_DEGREES) % 360);
     colorByShortName.set(name, `hsl(${hue}, 75%, 42%)`);
   });
   return colorByShortName;
