@@ -14,7 +14,6 @@ let baseZoom = null;
 const POPUP_AUTO_CLOSE_MS = 1200;
 
 const markersByStopId = new Map();
-let routesLayer = null;
 
 const map = L.map('map', { renderer: L.canvas() });
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -129,26 +128,101 @@ function connectWebSocket() {
   ws.addEventListener('error', () => ws.close());
 }
 
-function setupRoutesToggle(geojson) {
-  routesLayer = L.geoJSON(geojson, {
-    style: (feature) => ({ color: feature.properties.color, weight: 3, opacity: 0.85 }),
-  });
-  routesLayer.eachLayer((layer) => layer.bindTooltip(`Route ${layer.feature.properties.route}`));
-  document.getElementById('toggle-routes').addEventListener('change', (event) => {
-    if (event.target.checked) {
-      routesLayer.addTo(map);
-      routesLayer.bringToBack();
-    } else {
-      map.removeLayer(routesLayer);
+function buildRouteLayers(geojson) {
+  const featuresByRoute = new Map();
+  for (const feature of geojson.features) {
+    const route = feature.properties.route;
+    if (!featuresByRoute.has(route)) featuresByRoute.set(route, []);
+    featuresByRoute.get(route).push(feature);
+  }
+
+  const layersByRoute = new Map();
+  for (const [route, features] of featuresByRoute) {
+    const layer = L.geoJSON(
+      { type: 'FeatureCollection', features },
+      { style: (feature) => ({ color: feature.properties.color, weight: 3, opacity: 0.85 }) }
+    );
+    layer.eachLayer((l) => l.bindTooltip(`Route ${route}`));
+    layersByRoute.set(route, layer);
+  }
+  return layersByRoute;
+}
+
+function setupRouteSidebar(routesMeta, layersByRoute) {
+  const listEl = document.getElementById('route-list');
+  const toggleAllBtn = document.getElementById('toggle-all-routes');
+  const checkboxes = [];
+
+  function updateToggleAllLabel() {
+    const allChecked = checkboxes.length > 0 && checkboxes.every((cb) => cb.checked);
+    toggleAllBtn.textContent = allChecked ? 'Hide all routes' : 'Show all routes';
+  }
+
+  for (const route of routesMeta) {
+    const layer = layersByRoute.get(route.shortName);
+    if (!layer) continue; // route has no scheduled trips/shapes in this GTFS feed
+
+    const item = document.createElement('label');
+    item.className = 'route-item';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) {
+        layer.addTo(map);
+        layer.bringToBack();
+      } else {
+        map.removeLayer(layer);
+      }
+      updateToggleAllLabel();
+    });
+
+    const swatch = document.createElement('span');
+    swatch.className = 'route-color-swatch';
+    swatch.style.background = route.color;
+
+    const label = document.createElement('span');
+    label.className = 'route-label';
+    label.textContent = `${route.shortName} — ${route.longName}`;
+    label.title = label.textContent;
+
+    item.append(checkbox, swatch, label);
+    listEl.appendChild(item);
+    checkboxes.push(checkbox);
+  }
+
+  toggleAllBtn.addEventListener('click', () => {
+    const shouldShow = toggleAllBtn.textContent === 'Show all routes';
+    for (const checkbox of checkboxes) {
+      if (checkbox.checked !== shouldShow) {
+        checkbox.checked = shouldShow;
+        checkbox.dispatchEvent(new Event('change'));
+      }
     }
   });
+
+  updateToggleAllLabel();
+
+  const sidebar = document.getElementById('route-sidebar');
+  const collapseToggle = document.getElementById('sidebar-collapse-toggle');
+  function setCollapsed(collapsed) {
+    sidebar.classList.toggle('collapsed', collapsed);
+    collapseToggle.textContent = collapsed ? '☰' : '☰ Routes';
+  }
+  collapseToggle.addEventListener('click', () => {
+    setCollapsed(!sidebar.classList.contains('collapsed'));
+  });
+  // Start collapsed on small screens so the sidebar doesn't block the map.
+  setCollapsed(window.innerWidth < 700);
 }
 
 Promise.all([
   fetch('/api/stops').then((res) => res.json()),
   fetch('/api/routes').then((res) => res.json()),
-]).then(([stops, routesGeoJson]) => {
+  fetch('/api/routes-meta').then((res) => res.json()),
+]).then(([stops, routesGeoJson, routesMeta]) => {
   renderStops(stops);
-  setupRoutesToggle(routesGeoJson);
+  const layersByRoute = buildRouteLayers(routesGeoJson);
+  setupRouteSidebar(routesMeta, layersByRoute);
   connectWebSocket();
 });

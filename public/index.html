@@ -11,8 +11,16 @@
   <div id="map"></div>
   <div id="controls">
     <a href="stops.html">List view</a>
-    <label><input type="checkbox" id="toggle-routes" /> Show routes</label>
     <span id="stats"></span>
+  </div>
+  <div id="route-sidebar">
+    <button id="sidebar-collapse-toggle" type="button" aria-label="Toggle route list">☰ Routes</button>
+    <div id="route-sidebar-content">
+      <div id="route-sidebar-header">
+        <button id="toggle-all-routes" type="button">Show all routes</button>
+      </div>
+      <div id="route-list"></div>
+    </div>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>

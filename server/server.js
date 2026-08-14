@@ -78,7 +78,7 @@ async function main() {
   seedStopsFromCsv(db, stopRows);
   console.log(`Seeded ${stopRows.length} stops`);
 
-  const routesGeoJson = loadRouteLines(DATA_DIR);
+  const { geojson: routesGeoJson, colorByShortName } = loadRouteLines(DATA_DIR);
   console.log(`Loaded and bundled ${routesGeoJson.features.length} route shapes`);
 
   const { routesByStopId, routeLongNameByShortName } = loadStopRoutes(DATA_DIR);
@@ -86,6 +86,7 @@ async function main() {
   const routesMeta = Array.from(routeLongNameByShortName, ([shortName, longName]) => ({
     shortName,
     longName,
+    color: colorByShortName.get(shortName) || '#999999',
   })).sort((a, b) => naturalRouteCompare(a.shortName, b.shortName));
 
   const server = http.createServer((req, res) => {

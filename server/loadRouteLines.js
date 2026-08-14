@@ -159,7 +159,7 @@ function assignRouteColors(routeShortNames) {
 // tight interchanges, parallel one-way pairs, or overpasses.
 function loadRouteLines(dataDir) {
   const gtfsDir = findGtfsDir(dataDir);
-  if (!gtfsDir) return { type: 'FeatureCollection', features: [] };
+  if (!gtfsDir) return { geojson: { type: 'FeatureCollection', features: [] }, colorByShortName: new Map() };
 
   const routeShortNameById = new Map();
   for (const row of parseGtfsCsv(path.join(gtfsDir, 'routes.txt'))) {
@@ -247,7 +247,7 @@ function loadRouteLines(dataDir) {
     });
   }
 
-  return { type: 'FeatureCollection', features };
+  return { geojson: { type: 'FeatureCollection', features }, colorByShortName };
 }
 
 module.exports = { loadRouteLines };
