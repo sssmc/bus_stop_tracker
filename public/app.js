@@ -1,13 +1,21 @@
 'use strict';
 
-const BASE_RADIUS_UNVISITED = 5;
-const BASE_RADIUS_VISITED = 6;
+const MOBILE_BREAKPOINT_PX = 700;
+
+// Markers are smaller on mobile, where screen space is tight and stops render
+// much closer together relative to the viewport.
+const BASE_RADIUS_UNVISITED_DESKTOP = 5;
+const BASE_RADIUS_VISITED_DESKTOP = 6;
+const BASE_RADIUS_UNVISITED_MOBILE = 3;
+const BASE_RADIUS_VISITED_MOBILE = 4;
 const COLOR_UNVISITED = { color: '#3388ff', weight: 1, fillColor: '#3388ff', fillOpacity: 0.6 };
 const COLOR_VISITED = { color: '#2e7d32', weight: 1, fillColor: '#4caf50', fillOpacity: 0.9 };
 
-// Markers grow up to 6x their base size as you zoom in, reaching full size
-// ZOOM_SCALE_RANGE levels past the initial (zoomed-out, whole-region) view.
+// Markers start at half their base size at the zoomed-out region view and grow
+// up to 6x their base size as you zoom in, reaching full size ZOOM_SCALE_RANGE
+// levels past that initial view.
 const ZOOM_SCALE_RANGE = 8;
+const MIN_ZOOM_SCALE = 0.5;
 const MAX_ZOOM_SCALE = 6;
 let baseZoom = null;
 
@@ -27,10 +35,19 @@ function routeWeightForZoom(zoom) {
 // the (comparatively tiny) stop markers or they'd be hidden underneath them. Once
 // zoomed in past this (shorter than the weight taper) range, routes go back below
 // markers so clicking a stop stays reliable even where a route passes through it.
-const ROUTE_ZORDER_ZOOM_RANGE = 2;
+// Mobile screens show less of the map per zoom level, so stops stay dominant
+// (routes on top) for a few extra zoom levels there before handing priority back.
+const ROUTE_ZORDER_ZOOM_RANGE_DESKTOP = 2;
+const ROUTE_ZORDER_ZOOM_RANGE_MOBILE = 5;
+
+function routeZOrderZoomRange() {
+  return window.innerWidth < MOBILE_BREAKPOINT_PX
+    ? ROUTE_ZORDER_ZOOM_RANGE_MOBILE
+    : ROUTE_ZORDER_ZOOM_RANGE_DESKTOP;
+}
 
 function isLowZoom(zoom) {
-  return baseZoom != null && zoom < baseZoom + ROUTE_ZORDER_ZOOM_RANGE;
+  return baseZoom != null && zoom < baseZoom + routeZOrderZoomRange();
 }
 
 function applyRouteZOrder(layer, zoom) {
@@ -51,7 +68,9 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 function baseRadiusFor(visited) {
-  return visited ? BASE_RADIUS_VISITED : BASE_RADIUS_UNVISITED;
+  const isMobile = window.innerWidth < MOBILE_BREAKPOINT_PX;
+  if (visited) return isMobile ? BASE_RADIUS_VISITED_MOBILE : BASE_RADIUS_VISITED_DESKTOP;
+  return isMobile ? BASE_RADIUS_UNVISITED_MOBILE : BASE_RADIUS_UNVISITED_DESKTOP;
 }
 
 function colorStyleFor(visited) {
@@ -59,9 +78,9 @@ function colorStyleFor(visited) {
 }
 
 function zoomScale(zoom) {
-  if (baseZoom == null) return 1;
+  if (baseZoom == null) return MIN_ZOOM_SCALE;
   const t = Math.min(Math.max((zoom - baseZoom) / ZOOM_SCALE_RANGE, 0), 1);
-  return 1 + t * (MAX_ZOOM_SCALE - 1);
+  return MIN_ZOOM_SCALE + t * (MAX_ZOOM_SCALE - MIN_ZOOM_SCALE);
 }
 
 function updateMarkerRadius(marker) {
@@ -203,12 +222,22 @@ function setupRoutes(routesMeta, bundledGeoJson, rawGeoJson) {
   let recomputeTimer = null;
 
   function addRouteLine(route, latLngs, zoom) {
+    const baseWeight = routeWeightForZoom(zoom);
     const layer = L.polyline(latLngs, {
       color: colorByRoute.get(route) || '#999999',
-      weight: routeWeightForZoom(zoom),
+      weight: baseWeight,
       opacity: 0.85,
     });
-    layer.bindTooltip(`Route ${route}`);
+    layer._baseWeight = baseWeight;
+    layer.bindTooltip(`Route ${route}`, { sticky: true });
+    layer.on('mouseover', () => {
+      layer.setStyle({ weight: layer._baseWeight + 4, opacity: 1 });
+      layer.bringToFront();
+    });
+    layer.on('mouseout', () => {
+      layer.setStyle({ weight: layer._baseWeight, opacity: 0.85 });
+      applyRouteZOrder(layer, map.getZoom());
+    });
     layer.addTo(map);
     applyRouteZOrder(layer, zoom);
     currentLineLayers.push(layer);
@@ -250,6 +279,7 @@ function setupRoutes(routesMeta, bundledGeoJson, rawGeoJson) {
     const zoom = map.getZoom();
     const weight = routeWeightForZoom(zoom);
     for (const layer of currentLineLayers) {
+      layer._baseWeight = weight;
       layer.setStyle({ weight });
       applyRouteZOrder(layer, zoom);
     }
@@ -323,7 +353,7 @@ function setupRoutes(routesMeta, bundledGeoJson, rawGeoJson) {
     setCollapsed(!sidebar.classList.contains('collapsed'));
   });
   // Start collapsed on small screens so the sidebar doesn't block the map.
-  setCollapsed(window.innerWidth < 700);
+  setCollapsed(window.innerWidth < MOBILE_BREAKPOINT_PX);
 }
 
 Promise.all([
