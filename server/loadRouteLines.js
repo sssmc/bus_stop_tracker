@@ -151,15 +151,11 @@ function assignRouteColors(routeShortNames) {
   return colorByShortName;
 }
 
-// Builds a bundled/offset GeoJSON of route lines from the GTFS shapes, so routes
-// that share a road are drawn as visually separated parallel lines instead of
-// stacking exactly on top of each other. This is a grid-based approximation (no
-// real road-network topology): points within GRID_CELL_METERS of each other are
-// treated as "the same road", which can occasionally over- or under-bundle at
-// tight interchanges, parallel one-way pairs, or overpasses.
-function loadRouteLines(dataDir) {
+// Loads GTFS shapes joined to their route, and assigns each route a color. Shared
+// by both the bundled (offset) and raw geometry builders below.
+function loadGtfsShapes(dataDir) {
   const gtfsDir = findGtfsDir(dataDir);
-  if (!gtfsDir) return { geojson: { type: 'FeatureCollection', features: [] }, colorByShortName: new Map() };
+  if (!gtfsDir) return { shapes: [], colorByShortName: new Map() };
 
   const routeShortNameById = new Map();
   for (const row of parseGtfsCsv(path.join(gtfsDir, 'routes.txt'))) {
@@ -194,11 +190,31 @@ function loadRouteLines(dataDir) {
     const routeShortName = routeShortNameById.get(routeId);
     if (!routeShortName) continue;
     pts.sort((a, b) => a.seq - b.seq);
-    const metersPoints = pts.map((p) => toMeters(p.lat, p.lon));
-    shapes.push({ shapeId, routeShortName, resampled: resample(metersPoints, RESAMPLE_STEP_METERS) });
+    shapes.push({ shapeId, routeShortName, metersPoints: pts.map((p) => toMeters(p.lat, p.lon)) });
   }
 
   const colorByShortName = assignRouteColors(new Set(shapes.map((s) => s.routeShortName)));
+  return { shapes, colorByShortName };
+}
+
+// Builds a bundled/offset GeoJSON of route lines from the GTFS shapes, so routes
+// that share a road are drawn as visually separated parallel lines instead of
+// stacking exactly on top of each other. This is a grid-based approximation (no
+// real road-network topology): points within GRID_CELL_METERS of each other are
+// treated as "the same road", which can occasionally over- or under-bundle at
+// tight interchanges, parallel one-way pairs, or overpasses.
+//
+// This always bundles against ALL routes at once (not just a subset), so it's the
+// precomputed "everything visible" case: fast to serve since it's computed once at
+// startup. Showing an arbitrary subset of routes with correct (tighter) bundling
+// among just those routes is done client-side instead — see public/routeBundling.js.
+function loadRouteLines(dataDir) {
+  const { shapes: rawShapes, colorByShortName } = loadGtfsShapes(dataDir);
+  const shapes = rawShapes.map((s) => ({
+    shapeId: s.shapeId,
+    routeShortName: s.routeShortName,
+    resampled: resample(s.metersPoints, RESAMPLE_STEP_METERS),
+  }));
 
   const grid = new Map();
   for (const shape of shapes) {
@@ -250,4 +266,30 @@ function loadRouteLines(dataDir) {
   return { geojson: { type: 'FeatureCollection', features }, colorByShortName };
 }
 
-module.exports = { loadRouteLines };
+// Builds unbundled (no offset) simplified GeoJSON — the raw source geometry the
+// browser bundles on the fly for whatever subset of routes is currently visible.
+// No resampling needed here since there's no grid/offset step to feed.
+function loadRawRouteLines(dataDir) {
+  const { shapes, colorByShortName } = loadGtfsShapes(dataDir);
+
+  const features = shapes.map((shape) => {
+    const simplified = simplify(shape.metersPoints, SIMPLIFY_TOLERANCE_METERS);
+    const coordinates = simplified.map(([x, y]) => {
+      const [lat, lon] = toLatLon(x, y);
+      return [lon, lat];
+    });
+    return {
+      type: 'Feature',
+      properties: {
+        shapeId: shape.shapeId,
+        route: shape.routeShortName,
+        color: colorByShortName.get(shape.routeShortName),
+      },
+      geometry: { type: 'LineString', coordinates },
+    };
+  });
+
+  return { type: 'FeatureCollection', features };
+}
+
+module.exports = { loadRouteLines, loadRawRouteLines };

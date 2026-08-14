@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const { initDb, seedStopsFromCsv, getAllStopsWithVisited, setVisited, stopExists } = require('./db');
 const { parseStopsCsv } = require('./loadStopsCsv');
-const { loadRouteLines } = require('./loadRouteLines');
+const { loadRouteLines, loadRawRouteLines } = require('./loadRouteLines');
 const { loadStopRoutes, naturalRouteCompare } = require('./loadStopRoutes');
 const { createWsServer } = require('./ws');
 
@@ -81,6 +81,9 @@ async function main() {
   const { geojson: routesGeoJson, colorByShortName } = loadRouteLines(DATA_DIR);
   console.log(`Loaded and bundled ${routesGeoJson.features.length} route shapes`);
 
+  const routesRawGeoJson = loadRawRouteLines(DATA_DIR);
+  console.log(`Loaded ${routesRawGeoJson.features.length} raw (unbundled) route shapes`);
+
   const { routesByStopId, routeLongNameByShortName } = loadStopRoutes(DATA_DIR);
   console.log(`Derived route associations for ${routesByStopId.size} stops from GTFS data`);
   const routesMeta = Array.from(routeLongNameByShortName, ([shortName, longName]) => ({
@@ -103,6 +106,11 @@ async function main() {
 
     if (req.method === 'GET' && url.pathname === '/api/routes') {
       sendJson(res, 200, routesGeoJson);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/routes-raw') {
+      sendJson(res, 200, routesRawGeoJson);
       return;
     }
 

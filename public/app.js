@@ -158,38 +158,103 @@ function connectWebSocket() {
   ws.addEventListener('error', () => ws.close());
 }
 
-function buildRouteLayers(geojson) {
-  const featuresByRoute = new Map();
+// Groups the precomputed (server-bundled, all-routes-at-once) GeoJSON by route,
+// as [lon, lat] coordinate lists — the fast path used when every route is visible.
+function groupBundledCoordsByRoute(geojson) {
+  const byRoute = new Map();
   for (const feature of geojson.features) {
     const route = feature.properties.route;
-    if (!featuresByRoute.has(route)) featuresByRoute.set(route, []);
-    featuresByRoute.get(route).push(feature);
+    if (!byRoute.has(route)) byRoute.set(route, []);
+    byRoute.get(route).push(feature.geometry.coordinates);
+  }
+  return byRoute;
+}
+
+// Groups the raw (unbundled) GeoJSON by route as [lat, lon] point lists — the
+// source geometry used to bundle an arbitrary subset of routes on the fly.
+function groupRawShapesByRoute(geojson) {
+  const byRoute = new Map();
+  for (const feature of geojson.features) {
+    const route = feature.properties.route;
+    const points = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+    if (!byRoute.has(route)) byRoute.set(route, []);
+    byRoute.get(route).push({ shapeId: feature.properties.shapeId, route, points });
+  }
+  return byRoute;
+}
+
+// Manages which routes are shown and how their lines are bundled. When every
+// available route is visible, it uses the precomputed (server-bundled) geometry
+// instantly. Any partial subset is re-bundled client-side — using only the
+// visible routes' raw geometry — so overlapping routes stay tightly separated
+// from each other instead of using their offset slots from the full 69-route set.
+// Partial-subset recomputation is debounced so rapid toggling (or "Show all
+// routes" checking boxes one by one) doesn't trigger it dozens of times.
+const ROUTE_RECOMPUTE_DEBOUNCE_MS = 300;
+
+function setupRoutes(routesMeta, bundledGeoJson, rawGeoJson) {
+  const rawShapesByRoute = groupRawShapesByRoute(rawGeoJson);
+  const precomputedCoordsByRoute = groupBundledCoordsByRoute(bundledGeoJson);
+  const allRouteNames = new Set(rawShapesByRoute.keys());
+  const colorByRoute = new Map(routesMeta.map((r) => [r.shortName, r.color]));
+
+  const visibleRoutes = new Set();
+  let currentLineLayers = [];
+  let recomputeTimer = null;
+
+  function addRouteLine(route, latLngs, zoom) {
+    const layer = L.polyline(latLngs, {
+      color: colorByRoute.get(route) || '#999999',
+      weight: routeWeightForZoom(zoom),
+      opacity: 0.85,
+    });
+    layer.bindTooltip(`Route ${route}`);
+    layer.addTo(map);
+    applyRouteZOrder(layer, zoom);
+    currentLineLayers.push(layer);
   }
 
-  const initialWeight = routeWeightForZoom(map.getZoom());
-  const layersByRoute = new Map();
-  for (const [route, features] of featuresByRoute) {
-    const layer = L.geoJSON(
-      { type: 'FeatureCollection', features },
-      { style: (feature) => ({ color: feature.properties.color, weight: initialWeight, opacity: 0.85 }) }
-    );
-    layer.eachLayer((l) => l.bindTooltip(`Route ${route}`));
-    layersByRoute.set(route, layer);
+  function renderVisibleRoutes() {
+    for (const layer of currentLineLayers) map.removeLayer(layer);
+    currentLineLayers = [];
+    if (visibleRoutes.size === 0) return;
+
+    const zoom = map.getZoom();
+
+    if (visibleRoutes.size === allRouteNames.size) {
+      // Fast path: every route is visible, so the server's precomputed bundling
+      // (already correct for "all routes at once") can be used directly.
+      for (const route of visibleRoutes) {
+        for (const coordinates of precomputedCoordsByRoute.get(route) || []) {
+          addRouteLine(route, coordinates.map(([lon, lat]) => [lat, lon]), zoom);
+        }
+      }
+      return;
+    }
+
+    const subsetShapes = [];
+    for (const route of visibleRoutes) {
+      for (const shape of rawShapesByRoute.get(route) || []) subsetShapes.push(shape);
+    }
+    for (const shape of RouteBundling.bundleRoutes(subsetShapes)) {
+      addRouteLine(shape.route, shape.coordinates.map(([lon, lat]) => [lat, lon]), zoom);
+    }
+  }
+
+  function scheduleRecompute() {
+    clearTimeout(recomputeTimer);
+    recomputeTimer = setTimeout(renderVisibleRoutes, ROUTE_RECOMPUTE_DEBOUNCE_MS);
   }
 
   map.on('zoomend', () => {
     const zoom = map.getZoom();
     const weight = routeWeightForZoom(zoom);
-    for (const layer of layersByRoute.values()) {
+    for (const layer of currentLineLayers) {
       layer.setStyle({ weight });
-      if (map.hasLayer(layer)) applyRouteZOrder(layer, zoom);
+      applyRouteZOrder(layer, zoom);
     }
   });
 
-  return layersByRoute;
-}
-
-function setupRouteSidebar(routesMeta, layersByRoute) {
   const listEl = document.getElementById('route-list');
   const toggleAllBtn = document.getElementById('toggle-all-routes');
   const checkboxes = [];
@@ -200,8 +265,7 @@ function setupRouteSidebar(routesMeta, layersByRoute) {
   }
 
   for (const route of routesMeta) {
-    const layer = layersByRoute.get(route.shortName);
-    if (!layer) continue; // route has no scheduled trips/shapes in this GTFS feed
+    if (!allRouteNames.has(route.shortName)) continue; // no scheduled trips/shapes in this GTFS feed
 
     const item = document.createElement('label');
     item.className = 'route-item';
@@ -210,11 +274,11 @@ function setupRouteSidebar(routesMeta, layersByRoute) {
     checkbox.type = 'checkbox';
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) {
-        layer.addTo(map);
-        applyRouteZOrder(layer, map.getZoom());
+        visibleRoutes.add(route.shortName);
       } else {
-        map.removeLayer(layer);
+        visibleRoutes.delete(route.shortName);
       }
+      scheduleRecompute();
       updateToggleAllLabel();
     });
 
@@ -235,11 +299,16 @@ function setupRouteSidebar(routesMeta, layersByRoute) {
   toggleAllBtn.addEventListener('click', () => {
     const shouldShow = toggleAllBtn.textContent === 'Show all routes';
     for (const checkbox of checkboxes) {
-      if (checkbox.checked !== shouldShow) {
-        checkbox.checked = shouldShow;
-        checkbox.dispatchEvent(new Event('change'));
-      }
+      checkbox.checked = shouldShow;
     }
+    visibleRoutes.clear();
+    if (shouldShow) {
+      for (const route of allRouteNames) visibleRoutes.add(route);
+    }
+    // Bypass the debounce: both the empty and full-set cases render instantly.
+    clearTimeout(recomputeTimer);
+    renderVisibleRoutes();
+    updateToggleAllLabel();
   });
 
   updateToggleAllLabel();
@@ -260,10 +329,10 @@ function setupRouteSidebar(routesMeta, layersByRoute) {
 Promise.all([
   fetch('/api/stops').then((res) => res.json()),
   fetch('/api/routes').then((res) => res.json()),
+  fetch('/api/routes-raw').then((res) => res.json()),
   fetch('/api/routes-meta').then((res) => res.json()),
-]).then(([stops, routesGeoJson, routesMeta]) => {
+]).then(([stops, routesGeoJson, routesRawGeoJson, routesMeta]) => {
   renderStops(stops);
-  const layersByRoute = buildRouteLayers(routesGeoJson);
-  setupRouteSidebar(routesMeta, layersByRoute);
+  setupRoutes(routesMeta, routesGeoJson, routesRawGeoJson);
   connectWebSocket();
 });
