@@ -24,6 +24,13 @@ html, body {
   font-size: 14px;
 }
 
+#toggle-stops {
+  margin-left: 10px;
+  padding: 2px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 #stats {
   margin-left: 10px;
   color: #333;

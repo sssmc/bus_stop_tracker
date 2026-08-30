@@ -62,6 +62,11 @@ const POPUP_AUTO_CLOSE_MS = 1200;
 
 const markersByStopId = new Map();
 
+// Short names of routes marked ridden. Kept current from route-ridden-changed
+// WebSocket events (the map page has no ridden toggle of its own — those come
+// from the list page) so the score stays live. Feeds updateStats() only.
+const riddenRoutes = new Set();
+
 let activeWs = null;
 let myClientId = null;
 const userLocationMarkers = new Map(); // clientId -> L.CircleMarker
@@ -70,6 +75,12 @@ const map = L.map('map', { renderer: L.canvas() });
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors',
 }).addTo(map);
+
+// All stop markers live in this group so the "Hide stops" button can pull them
+// off the map (and put them back) in one call. Marker state — visited colour,
+// radius, stats — keeps updating from WebSocket events while hidden, so toggling
+// back shows the current picture.
+const stopLayer = L.layerGroup().addTo(map);
 
 function baseRadiusFor(visited) {
   const isMobile = window.innerWidth < MOBILE_BREAKPOINT_PX;
@@ -103,7 +114,15 @@ function updateStats() {
   for (const marker of markersByStopId.values()) {
     if (marker._visited) visitedCount += 1;
   }
-  document.getElementById('stats').textContent = `${visitedCount} / ${total} visited`;
+  const score = Score.compute(visitedCount, riddenRoutes.size);
+  document.getElementById('stats').textContent = `${score} pts · ${visitedCount} / ${total} visited`;
+}
+
+function setRiddenRoutes(routesMeta) {
+  riddenRoutes.clear();
+  for (const route of routesMeta) {
+    if (route.ridden) riddenRoutes.add(route.shortName);
+  }
 }
 
 function applyVisitedChange(stopid, visited) {
@@ -137,7 +156,7 @@ function renderStops(stops) {
       toggleVisited(stop.stopid);
       setTimeout(() => marker.closePopup(), POPUP_AUTO_CLOSE_MS);
     });
-    marker.addTo(map);
+    marker.addTo(stopLayer);
     markersByStopId.set(stop.stopid, marker);
     bounds.push([stop.latitude, stop.longitude]);
   }
@@ -149,13 +168,31 @@ function renderStops(stops) {
   updateStats();
 }
 
+function setupStopsToggle() {
+  const btn = document.getElementById('toggle-stops');
+  btn.addEventListener('click', () => {
+    if (map.hasLayer(stopLayer)) {
+      map.removeLayer(stopLayer);
+      btn.textContent = 'Show stops';
+    } else {
+      stopLayer.addTo(map);
+      btn.textContent = 'Hide stops';
+    }
+  });
+}
+
 function resyncStops() {
-  fetch('/api/stops')
-    .then((res) => res.json())
-    .then((stops) => {
+  Promise.all([
+    fetch('/api/stops').then((res) => res.json()),
+    fetch('/api/routes-meta').then((res) => res.json()),
+  ])
+    .then(([stops, routesMeta]) => {
       for (const stop of stops) {
         applyVisitedChange(stop.stopid, stop.visited);
       }
+      // Catches any ridden-route changes missed while the socket was down.
+      setRiddenRoutes(routesMeta);
+      updateStats();
     })
     .catch((err) => console.error('Failed to resync stops', err));
 }
@@ -228,6 +265,10 @@ function connectWebSocket() {
     const msg = JSON.parse(event.data);
     if (msg.type === 'visited-changed') {
       applyVisitedChange(msg.stopid, msg.visited);
+    } else if (msg.type === 'route-ridden-changed') {
+      if (msg.ridden) riddenRoutes.add(msg.shortName);
+      else riddenRoutes.delete(msg.shortName);
+      updateStats();
     } else if (msg.type === 'hello') {
       myClientId = msg.clientId;
     } else if (msg.type === 'user-location') {
@@ -434,7 +475,9 @@ Promise.all([
   fetch('/api/routes-raw').then((res) => res.json()),
   fetch('/api/routes-meta').then((res) => res.json()),
 ]).then(([stops, routesGeoJson, routesRawGeoJson, routesMeta]) => {
+  setRiddenRoutes(routesMeta);
   renderStops(stops);
+  setupStopsToggle();
   setupRoutes(routesMeta, routesGeoJson, routesRawGeoJson);
   connectWebSocket();
   shareLocationOverWebSocket();

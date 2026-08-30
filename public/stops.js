@@ -183,9 +183,10 @@ function updateStats(filteredCount) {
 
   const riddenCount = routesMeta.filter((r) => r.ridden).length;
   const routeTotal = routesMeta.length;
+  const score = Score.compute(visitedCount, riddenCount);
 
   document.getElementById('stats').textContent =
-    `${visitedCount} / ${total} visited (${percent}%)${showing} · ${riddenCount} / ${routeTotal} routes ridden`;
+    `${score} pts · ${visitedCount} / ${total} visited (${percent}%)${showing} · ${riddenCount} / ${routeTotal} routes ridden`;
 }
 
 function applyVisitedChange(stopid, visited) {
