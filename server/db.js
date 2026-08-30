@@ -23,6 +23,30 @@ CREATE TABLE IF NOT EXISTS ridden_routes (
   route_short_name TEXT PRIMARY KEY,
   ridden_at        TEXT NOT NULL
 );
+
+-- Precomputed GTFS schedule index (built once per feed by server/loadSchedule.js).
+CREATE TABLE IF NOT EXISTS schedule_meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS stop_times_idx (
+  stopid           INTEGER NOT NULL,
+  trip_id          TEXT NOT NULL,
+  route_short_name TEXT NOT NULL,
+  headsign         TEXT,
+  direction_id     INTEGER,
+  service_id       TEXT NOT NULL,
+  dep_sec          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_stx_stop ON stop_times_idx (stopid, dep_sec);
+CREATE INDEX IF NOT EXISTS ix_stx_service ON stop_times_idx (service_id);
+
+CREATE TABLE IF NOT EXISTS service_dates (
+  service_id TEXT NOT NULL,
+  yyyymmdd   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_svc_date ON service_dates (yyyymmdd);
 `;
 
 function initDb(dbPath) {

@@ -4,6 +4,7 @@ let allStops = [];
 let allStopsById = new Map();
 let routesMeta = [];
 let routesMetaByShortName = new Map();
+let scheduleByRoute = new Map();
 const rowsByStopId = new Map();
 let routeGroups = []; // { wrapper, heading, baseTitle, stopIds }
 let riddenCheckboxByRoute = new Map();
@@ -99,6 +100,16 @@ function buildRouteGroup(title, stops, route) {
   const headingText = document.createElement('span');
   headingText.className = 'route-group-heading-text';
   heading.appendChild(headingText);
+
+  if (route) {
+    const sched = scheduleByRoute.get(route.shortName);
+    if (sched && sched.tripsToday > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'route-sched';
+      badge.textContent = `${sched.tripsToday} trips · ${sched.firstDep}–${sched.lastDep}${sched.night ? ' 🌙' : ''}`;
+      heading.appendChild(badge);
+    }
+  }
 
   if (route) {
     const riddenLabel = document.createElement('label');
@@ -380,6 +391,15 @@ function setRoutesMeta(meta) {
   routesMetaByShortName = new Map(meta.map((r) => [r.shortName, r]));
 }
 
+function setSchedule(schedule) {
+  scheduleByRoute = new Map(schedule.map((s) => [s.shortName, s]));
+  // Fold the night flag onto routesMeta so the Night Owl achievement can see it.
+  for (const route of routesMeta) {
+    const sched = scheduleByRoute.get(route.shortName);
+    route.night = Boolean(sched && sched.night);
+  }
+}
+
 function loadActivity() {
   return fetch(`/api/activity?limit=${ACTIVITY_LIMIT}`)
     .then((res) => res.json())
@@ -394,10 +414,12 @@ function resync() {
   Promise.all([
     fetch('/api/stops').then((res) => res.json()),
     fetch('/api/routes-meta').then((res) => res.json()),
+    fetch('/api/routes-schedule').then((res) => res.json()),
   ])
-    .then(([stops, meta]) => {
+    .then(([stops, meta, schedule]) => {
       setAllStops(stops);
       setRoutesMeta(meta);
+      setSchedule(schedule);
       render();
       refreshProgress();
       loadActivity();
@@ -439,9 +461,11 @@ document.getElementById('undo-last').addEventListener('click', (event) => {
 Promise.all([
   fetch('/api/stops').then((res) => res.json()),
   fetch('/api/routes-meta').then((res) => res.json()),
-]).then(([stops, meta]) => {
+  fetch('/api/routes-schedule').then((res) => res.json()),
+]).then(([stops, meta, schedule]) => {
   setAllStops(stops);
   setRoutesMeta(meta);
+  setSchedule(schedule);
   render();
   refreshProgress();
   loadActivity();

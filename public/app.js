@@ -58,7 +58,14 @@ function applyRouteZOrder(layer, zoom) {
   }
 }
 
-const POPUP_AUTO_CLOSE_MS = 1200;
+// How long a stop popup stays open after it's shown (on click, or reopened). Long
+// enough to read the scheduled departures; the visited-toggle colour change is
+// instant either way.
+const POPUP_LINGER_MS = 6000;
+
+// stopid -> Promise<departures[]>, cached for the session so reopening a popup is
+// instant and doesn't refetch.
+const departuresCache = new Map();
 
 const markersByStopId = new Map();
 
@@ -72,6 +79,10 @@ const riddenRouteAtByName = new Map();
 const routeLongNameByShortName = new Map();
 // route short name -> length in km, from /api/routes-meta, for the "km ridden" stat.
 const routeKmByName = new Map();
+// route short name -> { tripsToday, firstDep, lastDep, night }, from
+// /api/routes-schedule. nightRouteNames is the subset flagged as night routes.
+const scheduleByRoute = new Map();
+const nightRouteNames = new Set();
 
 const ACTIVITY_LIMIT = 40;
 let activityEvents = [];
@@ -157,6 +168,15 @@ function ingestRoutesMeta(routesMeta) {
   }
 }
 
+function ingestSchedule(schedule) {
+  scheduleByRoute.clear();
+  nightRouteNames.clear();
+  for (const entry of schedule) {
+    scheduleByRoute.set(entry.shortName, entry);
+    if (entry.night) nightRouteNames.add(entry.shortName);
+  }
+}
+
 function updateAchievements(streakDays, kmRidden) {
   const stops = [];
   for (const marker of markersByStopId.values()) {
@@ -167,7 +187,7 @@ function updateAchievements(streakDays, kmRidden) {
     riddenCount: riddenRouteAtByName.size,
     kmRidden,
     streakDays,
-    nightRouteRidden: false, // wired up in the schedule-data phase
+    nightRouteRidden: [...riddenRouteAtByName.keys()].some((name) => nightRouteNames.has(name)),
   });
   Achievements.renderBadges(document.getElementById('badges'), result, { compact: true });
 
@@ -229,10 +249,19 @@ function renderStops(stops) {
     marker._stopname = stop.stopname;
     marker._muni = stop.muni || '';
     marker._routes = stop.routes || [];
-    marker.bindPopup(stop.stopname);
+    marker._stopid = stop.stopid;
+    marker.bindPopup(stopPopupHtml(marker));
     marker.on('click', () => {
       toggleVisited(stop.stopid);
-      setTimeout(() => marker.closePopup(), POPUP_AUTO_CLOSE_MS);
+      // Give the popup long enough to read the departures; the toggle feedback
+      // (colour change) is instant regardless.
+      clearTimeout(marker._popupTimer);
+      marker._popupTimer = setTimeout(() => marker.closePopup(), POPUP_LINGER_MS);
+    });
+    marker.on('popupopen', () => {
+      clearTimeout(marker._popupTimer);
+      marker._popupTimer = setTimeout(() => marker.closePopup(), POPUP_LINGER_MS);
+      fillDepartures(marker);
     });
     marker.addTo(stopLayer);
     markersByStopId.set(stop.stopid, marker);
@@ -244,6 +273,64 @@ function renderStops(stops) {
   baseZoom = map.getZoom();
   map.on('zoomend', updateAllMarkerRadii);
   updateStats();
+}
+
+// --- Stop popups with scheduled departures --------------------------------
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function departuresHtml(departures) {
+  if (departures == null) return '<div class="stop-popup-departures">Departures unavailable</div>';
+  if (departures.length === 0) {
+    return '<div class="stop-popup-departures">No more buses today (scheduled)</div>';
+  }
+  return (
+    '<div class="stop-popup-departures"><div class="dep-head">Next buses (scheduled)</div>' +
+    departures
+      .map(
+        (d) =>
+          `<div class="dep-row"><span class="dep-time">${d.time}</span> ` +
+          `<span class="dep-route">#${escapeHtml(d.route)}</span> ` +
+          `<span class="dep-head-sign">${escapeHtml(d.headsign || '')}</span> ` +
+          `<span class="dep-in">${d.inMinutes <= 0 ? 'now' : d.inMinutes + ' min'}</span></div>`
+      )
+      .join('') +
+    '</div>'
+  );
+}
+
+// depSection: HTML for the departures block; defaults to a loading placeholder.
+function stopPopupHtml(marker, depSection) {
+  const routes = (marker._routes || []).join(', ');
+  return (
+    `<div class="stop-popup">` +
+    `<strong>${escapeHtml(marker._stopname || '')}</strong>` +
+    (routes ? `<div class="stop-popup-routes">Routes ${escapeHtml(routes)}</div>` : '') +
+    (depSection || '<div class="stop-popup-departures">Loading departures…</div>') +
+    `</div>`
+  );
+}
+
+function fillDepartures(marker) {
+  const stopid = marker._stopid;
+  if (!departuresCache.has(stopid)) {
+    departuresCache.set(
+      stopid,
+      fetch(`/api/stops/${stopid}/departures?limit=6`)
+        .then((res) => res.json())
+        .then((body) => body.departures || [])
+        .catch(() => null)
+    );
+  }
+  departuresCache.get(stopid).then((departures) => {
+    const popup = marker.getPopup();
+    // Only refresh if this stop's popup is still the one showing.
+    if (popup && popup.isOpen()) {
+      popup.setContent(stopPopupHtml(marker, departuresHtml(departures)));
+    }
+  });
 }
 
 function setupStopsToggle() {
@@ -593,6 +680,16 @@ function setupRoutes(routesMeta, bundledGeoJson, rawGeoJson) {
     label.title = label.textContent;
 
     item.append(checkbox, swatch, label);
+
+    const sched = scheduleByRoute.get(route.shortName);
+    if (sched && sched.tripsToday > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'route-sched';
+      badge.textContent = `${sched.tripsToday}/day${sched.night ? ' 🌙' : ''}`;
+      badge.title = `${sched.firstDep}–${sched.lastDep} · ${sched.tripsToday} trips today`;
+      item.appendChild(badge);
+    }
+
     listEl.appendChild(item);
     checkboxes.push(checkbox);
   }
@@ -632,12 +729,17 @@ Promise.all([
   fetch('/api/routes').then((res) => res.json()),
   fetch('/api/routes-raw').then((res) => res.json()),
   fetch('/api/routes-meta').then((res) => res.json()),
-]).then(([stops, routesGeoJson, routesRawGeoJson, routesMeta]) => {
+  fetch('/api/routes-schedule').then((res) => res.json()),
+]).then(([stops, routesGeoJson, routesRawGeoJson, routesMeta, schedule]) => {
   ingestRoutesMeta(routesMeta);
+  ingestSchedule(schedule);
   renderStops(stops);
   setupStopsToggle();
   setupActivity();
   setupRoutes(routesMeta, routesGeoJson, routesRawGeoJson);
   connectWebSocket();
   shareLocationOverWebSocket();
+
+  // Handle for the browser console / e2e checks.
+  window.busStopTracker = { map, markersByStopId };
 });
