@@ -12,8 +12,12 @@ const searchInput = document.getElementById('search');
 const groupToggle = document.getElementById('toggle-group');
 const listContainer = document.getElementById('stop-list');
 const activityListEl = document.getElementById('activity-list');
+const muniBoardEl = document.getElementById('muni-board');
+const badgesEl = document.getElementById('badges');
 const ACTIVITY_LIMIT = 40;
 let activityEvents = [];
+let earnedAchievements = new Set();
+let achievementsReady = false;
 
 function toggleVisited(stopid, currentlyVisited) {
   fetch(`/api/stops/${stopid}/visited`, {
@@ -192,9 +196,86 @@ function updateStats(filteredCount) {
     allStops.map((s) => s.visitedAt),
     routesMeta.map((r) => r.riddenAt)
   );
+  const km = Score.kmSummary(routesMeta);
 
   document.getElementById('stats').textContent =
-    `${score} pts${Activity.momentumSummary(m)} · ${visitedCount} / ${total} visited (${percent}%)${showing} · ${riddenCount} / ${routeTotal} routes ridden`;
+    `${score} pts${Activity.momentumSummary(m)} · ${visitedCount} / ${total} visited (${percent}%)${showing} · ${riddenCount} / ${routeTotal} routes ridden · ${Math.round(km.ridden)} / ${Math.round(km.total)} km`;
+}
+
+// The municipality board and achievements only change when a stop or route is
+// checked off — not on every search keystroke — so they refresh separately from
+// the (cheap) stats line.
+function refreshProgress() {
+  const m = Activity.momentum(
+    allStops.map((s) => s.visitedAt),
+    routesMeta.map((r) => r.riddenAt)
+  );
+  const km = Score.kmSummary(routesMeta);
+  renderMuniBoard();
+  updateAchievements(m.streakDays, km.ridden);
+}
+
+function renderMuniBoard() {
+  const totals = new Map(); // muni -> { visited, total }
+  for (const stop of allStops) {
+    const key = stop.muni || 'Unknown';
+    let entry = totals.get(key);
+    if (!entry) {
+      entry = { visited: 0, total: 0 };
+      totals.set(key, entry);
+    }
+    entry.total += 1;
+    if (stop.visited) entry.visited += 1;
+  }
+
+  const rows = [...totals.entries()]
+    .map(([muni, e]) => ({ muni, ...e, pct: e.total ? e.visited / e.total : 0 }))
+    .sort((a, b) => b.pct - a.pct || b.total - a.total);
+
+  muniBoardEl.innerHTML = '';
+  for (const row of rows) {
+    const el = document.createElement('div');
+    el.className = 'muni-row' + (row.visited === row.total ? ' muni-done' : '');
+
+    const name = document.createElement('span');
+    name.className = 'muni-name';
+    name.textContent = row.muni;
+
+    const bar = document.createElement('span');
+    bar.className = 'muni-bar';
+    const fill = document.createElement('span');
+    fill.className = 'muni-bar-fill';
+    fill.style.width = `${Math.round(row.pct * 100)}%`;
+    bar.appendChild(fill);
+
+    const count = document.createElement('span');
+    count.className = 'muni-count';
+    count.textContent = `${row.visited} / ${row.total}`;
+
+    el.append(name, bar, count);
+    muniBoardEl.appendChild(el);
+  }
+}
+
+function updateAchievements(streakDays, kmRidden) {
+  const result = Achievements.evaluate({
+    stops: allStops,
+    riddenCount: routesMeta.filter((r) => r.ridden).length,
+    kmRidden,
+    streakDays,
+    nightRouteRidden: routesMeta.some((r) => r.ridden && r.night),
+  });
+  Achievements.renderBadges(badgesEl, result, { compact: false });
+
+  if (achievementsReady) {
+    for (const rule of result.rules) {
+      if (result.earned.has(rule.id) && !earnedAchievements.has(rule.id)) {
+        Achievements.toast(rule.name);
+      }
+    }
+  }
+  earnedAchievements = result.earned;
+  achievementsReady = true;
 }
 
 function renderActivity() {
@@ -251,6 +332,7 @@ function applyVisitedChange(stopid, visited, at) {
   }
 
   updateStats(listContainer.querySelectorAll('.stop-row').length);
+  refreshProgress();
 }
 
 function applyRiddenChange(shortName, ridden, at) {
@@ -275,6 +357,7 @@ function applyRiddenChange(shortName, ridden, at) {
   }
 
   updateStats(listContainer.querySelectorAll('.stop-row').length);
+  refreshProgress();
 }
 
 function undoLastActivity() {
@@ -316,6 +399,7 @@ function resync() {
       setAllStops(stops);
       setRoutesMeta(meta);
       render();
+      refreshProgress();
       loadActivity();
     })
     .catch((err) => console.error('Failed to resync', err));
@@ -359,6 +443,7 @@ Promise.all([
   setAllStops(stops);
   setRoutesMeta(meta);
   render();
+  refreshProgress();
   loadActivity();
   connectWebSocket();
 });

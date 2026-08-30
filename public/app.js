@@ -70,9 +70,13 @@ const markersByStopId = new Map();
 const riddenRouteAtByName = new Map();
 // route short name -> long name, from /api/routes-meta, for the activity feed.
 const routeLongNameByShortName = new Map();
+// route short name -> length in km, from /api/routes-meta, for the "km ridden" stat.
+const routeKmByName = new Map();
 
 const ACTIVITY_LIMIT = 40;
 let activityEvents = [];
+let earnedAchievements = new Set();
+let achievementsReady = false;
 
 let activeWs = null;
 let myClientId = null;
@@ -127,27 +131,68 @@ function updateStats() {
   }
   const score = Score.compute(visitedCount, riddenRouteAtByName.size);
   const m = Activity.momentum(stopTimestamps, [...riddenRouteAtByName.values()]);
+
+  let kmRidden = 0;
+  let kmTotal = 0;
+  for (const [name, km] of routeKmByName) {
+    kmTotal += km;
+    if (riddenRouteAtByName.has(name)) kmRidden += km;
+  }
+
   document.getElementById('stats').textContent =
-    `${score} pts${Activity.momentumSummary(m)} · ${visitedCount} / ${total} visited`;
+    `${score} pts${Activity.momentumSummary(m)} · ${visitedCount} / ${total} visited · ${Math.round(kmRidden)} / ${Math.round(kmTotal)} km`;
+
+  updateAchievements(m.streakDays, kmRidden);
 }
 
-// Rebuilds the ridden-route and long-name maps from a fresh /api/routes-meta.
+// Rebuilds the ridden-route / long-name / length maps from a fresh /api/routes-meta.
 function ingestRoutesMeta(routesMeta) {
   riddenRouteAtByName.clear();
   routeLongNameByShortName.clear();
+  routeKmByName.clear();
   for (const route of routesMeta) {
     routeLongNameByShortName.set(route.shortName, route.longName);
+    routeKmByName.set(route.shortName, route.lengthKm || 0);
     if (route.ridden) riddenRouteAtByName.set(route.shortName, route.riddenAt);
   }
 }
 
-function applyVisitedChange(stopid, visited, at) {
+function updateAchievements(streakDays, kmRidden) {
+  const stops = [];
+  for (const marker of markersByStopId.values()) {
+    stops.push({ visited: marker._visited, muni: marker._muni, routes: marker._routes });
+  }
+  const result = Achievements.evaluate({
+    stops,
+    riddenCount: riddenRouteAtByName.size,
+    kmRidden,
+    streakDays,
+    nightRouteRidden: false, // wired up in the schedule-data phase
+  });
+  Achievements.renderBadges(document.getElementById('badges'), result, { compact: true });
+
+  if (achievementsReady) {
+    for (const rule of result.rules) {
+      if (result.earned.has(rule.id) && !earnedAchievements.has(rule.id)) {
+        Achievements.toast(rule.name);
+      }
+    }
+  }
+  earnedAchievements = result.earned;
+  achievementsReady = true;
+}
+
+// opts.silent: update the marker only — skip the activity feed and the (heavier)
+// stats/achievements recompute. Used by the bulk resync loop, which reloads the
+// feed and recomputes once at the end.
+function applyVisitedChange(stopid, visited, at, opts = {}) {
   const marker = markersByStopId.get(stopid);
   if (!marker) return;
   marker._visited = visited;
   marker._visitedAt = visited ? at || marker._visitedAt || new Date().toISOString() : null;
   marker.setStyle(colorStyleFor(visited));
   updateMarkerRadius(marker);
+  if (opts.silent) return;
 
   if (visited) {
     pushActivityEvent({
@@ -183,6 +228,7 @@ function renderStops(stops) {
     marker._visitedAt = stop.visitedAt || null;
     marker._stopname = stop.stopname;
     marker._muni = stop.muni || '';
+    marker._routes = stop.routes || [];
     marker.bindPopup(stop.stopname);
     marker.on('click', () => {
       toggleVisited(stop.stopid);
@@ -289,7 +335,7 @@ function resyncStops() {
   ])
     .then(([stops, routesMeta]) => {
       for (const stop of stops) {
-        applyVisitedChange(stop.stopid, stop.visited, stop.visitedAt);
+        applyVisitedChange(stop.stopid, stop.visited, stop.visitedAt, { silent: true });
       }
       // Catches any ridden-route changes missed while the socket was down.
       ingestRoutesMeta(routesMeta);

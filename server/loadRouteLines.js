@@ -35,6 +35,12 @@ function distance(a, b) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+function polylineLengthMeters(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += distance(points[i - 1], points[i]);
+  return total;
+}
+
 // Resamples a [lat, lon][] polyline to even spacing (in meters-space), preserving
 // the endpoints. Returns points in the same [lat, lon] meters-projected form.
 function resample(metersPoints, stepMeters) {
@@ -214,6 +220,17 @@ function loadGtfsShapes(dataDir) {
 // among just those routes is done client-side instead — see public/routeBundling.js.
 function loadRouteLines(dataDir) {
   const { shapes: rawShapes, colorByShortName } = loadGtfsShapes(dataDir);
+
+  // Route length in km = the longest single shape on that route (a good proxy for
+  // "one end-to-end trip"). Used for the "km ridden" stat, not for scoring.
+  const routeLengthKmByShortName = new Map();
+  for (const s of rawShapes) {
+    const km = polylineLengthMeters(s.metersPoints) / 1000;
+    if (km > (routeLengthKmByShortName.get(s.routeShortName) || 0)) {
+      routeLengthKmByShortName.set(s.routeShortName, km);
+    }
+  }
+
   const shapes = rawShapes.map((s) => ({
     shapeId: s.shapeId,
     routeShortName: s.routeShortName,
@@ -267,7 +284,11 @@ function loadRouteLines(dataDir) {
     });
   }
 
-  return { geojson: { type: 'FeatureCollection', features }, colorByShortName };
+  return {
+    geojson: { type: 'FeatureCollection', features },
+    colorByShortName,
+    routeLengthKmByShortName,
+  };
 }
 
 // Builds unbundled (no offset) simplified GeoJSON — the raw source geometry the

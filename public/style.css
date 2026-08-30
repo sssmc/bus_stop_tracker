@@ -261,6 +261,142 @@ html, body {
   max-height: 40vh;
 }
 
+/* Achievement badges (shared) + unlock toast */
+
+.badges-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  background: #eee;
+  color: #666;
+}
+
+.badge-earned {
+  background: #e5f3e5;
+  color: #2e7d32;
+  font-weight: bold;
+}
+
+body:not(.list-page) #badges.badges-strip {
+  /* map page: floating strip along the bottom-centre of the map */
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  z-index: 1000;
+  max-width: calc(100vw - 120px);
+  justify-content: center;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 6px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+}
+
+#badges.badges-strip:empty {
+  display: none;
+}
+
+/* list page: badges sit inline in the normal flow */
+body.list-page #badges.badges-strip {
+  max-width: 700px;
+  margin: 8px auto 0;
+  padding: 0 12px;
+}
+
+#achievement-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%) translateY(20px);
+  z-index: 2000;
+  background: #2e7d32;
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  font-weight: bold;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#achievement-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Municipality completion board (list page) */
+
+#muni-panel {
+  max-width: 700px;
+  margin: 6px auto 0;
+  padding: 0 2px;
+  font-size: 13px;
+}
+
+#muni-panel > summary {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-weight: bold;
+  color: #444;
+  list-style: none;
+}
+
+#muni-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+#muni-board {
+  padding: 4px 0;
+}
+
+.muni-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 12px;
+}
+
+.muni-name {
+  flex: 0 0 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muni-bar {
+  flex: 1;
+  height: 8px;
+  background: #eee;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.muni-bar-fill {
+  display: block;
+  height: 100%;
+  background: #4caf50;
+}
+
+.muni-count {
+  flex: 0 0 auto;
+  color: #666;
+  font-variant-numeric: tabular-nums;
+}
+
+.muni-row.muni-done .muni-name {
+  color: #2e7d32;
+  font-weight: bold;
+}
+
 /* Stop list page */
 
 body.list-page {
