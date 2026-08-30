@@ -106,6 +106,39 @@ function getRiddenRouteNames(db) {
   );
 }
 
+// [{ shortName, riddenAt }] — like getRiddenRouteNames but carrying the timestamp
+// so the client can compute "routes ridden today / this week".
+function getRiddenRoutes(db) {
+  return db
+    .prepare('SELECT route_short_name AS shortName, ridden_at AS riddenAt FROM ridden_routes')
+    .all();
+}
+
+// Most recent check-ins across both stops and routes, newest first. Route entries
+// carry only shortName; the caller fills in longName from its in-memory GTFS map.
+function getRecentActivity(db, limit) {
+  const stopEvents = db
+    .prepare(
+      `SELECT s.stopid, s.stopname, s.muni, v.visited_at AS at
+       FROM visited v JOIN stops s ON s.stopid = v.stopid
+       ORDER BY v.visited_at DESC LIMIT ?`
+    )
+    .all(limit)
+    .map((row) => ({ type: 'stop', ...row }));
+
+  const routeEvents = db
+    .prepare(
+      `SELECT route_short_name AS shortName, ridden_at AS at
+       FROM ridden_routes ORDER BY ridden_at DESC LIMIT ?`
+    )
+    .all(limit)
+    .map((row) => ({ type: 'route', ...row }));
+
+  return [...stopEvents, ...routeEvents]
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+    .slice(0, limit);
+}
+
 function setRouteRidden(db, shortName, ridden) {
   if (ridden) {
     const riddenAt = new Date().toISOString();
@@ -126,5 +159,7 @@ module.exports = {
   setVisited,
   stopExists,
   getRiddenRouteNames,
+  getRiddenRoutes,
+  getRecentActivity,
   setRouteRidden,
 };

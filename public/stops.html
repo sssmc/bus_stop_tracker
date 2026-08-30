@@ -13,8 +13,16 @@
     <label><input type="checkbox" id="toggle-group" checked /> Group by route</label>
     <span id="stats"></span>
   </div>
+  <details id="activity-panel">
+    <summary>
+      <span>Recent activity</span>
+      <button type="button" id="undo-last">Undo last</button>
+    </summary>
+    <ul id="activity-list"></ul>
+  </details>
   <div id="stop-list"></div>
   <script src="score.js"></script>
+  <script src="activity.js"></script>
   <script src="stops.js"></script>
 </body>
 </html>

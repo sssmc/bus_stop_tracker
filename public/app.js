@@ -62,10 +62,17 @@ const POPUP_AUTO_CLOSE_MS = 1200;
 
 const markersByStopId = new Map();
 
-// Short names of routes marked ridden. Kept current from route-ridden-changed
-// WebSocket events (the map page has no ridden toggle of its own — those come
-// from the list page) so the score stays live. Feeds updateStats() only.
-const riddenRoutes = new Set();
+// route short name -> ridden_at ISO string, for every route currently marked
+// ridden. Kept current from route-ridden-changed WebSocket events (the map page
+// has no ridden toggle of its own — those come from the list page). Feeds the
+// score, the "km ridden" stat, and the momentum figures. Its .size is the ridden
+// route count.
+const riddenRouteAtByName = new Map();
+// route short name -> long name, from /api/routes-meta, for the activity feed.
+const routeLongNameByShortName = new Map();
+
+const ACTIVITY_LIMIT = 40;
+let activityEvents = [];
 
 let activeWs = null;
 let myClientId = null;
@@ -111,26 +118,48 @@ function updateAllMarkerRadii() {
 function updateStats() {
   const total = markersByStopId.size;
   let visitedCount = 0;
+  const stopTimestamps = [];
   for (const marker of markersByStopId.values()) {
-    if (marker._visited) visitedCount += 1;
+    if (marker._visited) {
+      visitedCount += 1;
+      stopTimestamps.push(marker._visitedAt);
+    }
   }
-  const score = Score.compute(visitedCount, riddenRoutes.size);
-  document.getElementById('stats').textContent = `${score} pts · ${visitedCount} / ${total} visited`;
+  const score = Score.compute(visitedCount, riddenRouteAtByName.size);
+  const m = Activity.momentum(stopTimestamps, [...riddenRouteAtByName.values()]);
+  document.getElementById('stats').textContent =
+    `${score} pts${Activity.momentumSummary(m)} · ${visitedCount} / ${total} visited`;
 }
 
-function setRiddenRoutes(routesMeta) {
-  riddenRoutes.clear();
+// Rebuilds the ridden-route and long-name maps from a fresh /api/routes-meta.
+function ingestRoutesMeta(routesMeta) {
+  riddenRouteAtByName.clear();
+  routeLongNameByShortName.clear();
   for (const route of routesMeta) {
-    if (route.ridden) riddenRoutes.add(route.shortName);
+    routeLongNameByShortName.set(route.shortName, route.longName);
+    if (route.ridden) riddenRouteAtByName.set(route.shortName, route.riddenAt);
   }
 }
 
-function applyVisitedChange(stopid, visited) {
+function applyVisitedChange(stopid, visited, at) {
   const marker = markersByStopId.get(stopid);
   if (!marker) return;
   marker._visited = visited;
+  marker._visitedAt = visited ? at || marker._visitedAt || new Date().toISOString() : null;
   marker.setStyle(colorStyleFor(visited));
   updateMarkerRadius(marker);
+
+  if (visited) {
+    pushActivityEvent({
+      type: 'stop',
+      stopid,
+      stopname: marker._stopname || `Stop ${stopid}`,
+      muni: marker._muni || '',
+      at: marker._visitedAt,
+    });
+  } else {
+    dropActivityEvent((e) => e.type === 'stop' && e.stopid === stopid);
+  }
   updateStats();
 }
 
@@ -151,6 +180,9 @@ function renderStops(stops) {
     const style = { radius: baseRadiusFor(stop.visited), ...colorStyleFor(stop.visited) };
     const marker = L.circleMarker([stop.latitude, stop.longitude], style);
     marker._visited = stop.visited;
+    marker._visitedAt = stop.visitedAt || null;
+    marker._stopname = stop.stopname;
+    marker._muni = stop.muni || '';
     marker.bindPopup(stop.stopname);
     marker.on('click', () => {
       toggleVisited(stop.stopid);
@@ -181,6 +213,75 @@ function setupStopsToggle() {
   });
 }
 
+// --- Recent-activity feed ---------------------------------------------------
+
+function renderActivity() {
+  Activity.renderFeed(document.getElementById('activity-list'), activityEvents);
+}
+
+function pushActivityEvent(event) {
+  activityEvents = [
+    event,
+    ...activityEvents.filter((e) =>
+      e.type !== event.type
+        ? true
+        : event.type === 'stop'
+          ? e.stopid !== event.stopid
+          : e.shortName !== event.shortName
+    ),
+  ].slice(0, ACTIVITY_LIMIT);
+  renderActivity();
+}
+
+function dropActivityEvent(predicate) {
+  const next = activityEvents.filter((e) => !predicate(e));
+  if (next.length !== activityEvents.length) {
+    activityEvents = next;
+    renderActivity();
+  }
+}
+
+function undoLastActivity() {
+  const last = activityEvents[0];
+  if (!last) return;
+  if (last.type === 'stop') {
+    const marker = markersByStopId.get(last.stopid);
+    if (marker && marker._visited) toggleVisited(last.stopid);
+  } else {
+    fetch(`/api/routes/${encodeURIComponent(last.shortName)}/ridden`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ridden: false }),
+    }).catch((err) => console.error('Failed to undo ridden route', err));
+  }
+}
+
+function loadActivity() {
+  return fetch(`/api/activity?limit=${ACTIVITY_LIMIT}`)
+    .then((res) => res.json())
+    .then((events) => {
+      activityEvents = events;
+      renderActivity();
+    })
+    .catch((err) => console.error('Failed to load activity', err));
+}
+
+function setupActivity() {
+  const sidebar = document.getElementById('activity-sidebar');
+  const header = document.getElementById('activity-sidebar-header');
+  header.addEventListener('click', (event) => {
+    if (event.target.id === 'undo-last-map') return;
+    sidebar.classList.toggle('collapsed');
+  });
+  document.getElementById('undo-last-map').addEventListener('click', (event) => {
+    event.stopPropagation();
+    undoLastActivity();
+  });
+  // Start collapsed on small screens so it doesn't cover the map.
+  sidebar.classList.toggle('collapsed', window.innerWidth < MOBILE_BREAKPOINT_PX);
+  loadActivity();
+}
+
 function resyncStops() {
   Promise.all([
     fetch('/api/stops').then((res) => res.json()),
@@ -188,10 +289,11 @@ function resyncStops() {
   ])
     .then(([stops, routesMeta]) => {
       for (const stop of stops) {
-        applyVisitedChange(stop.stopid, stop.visited);
+        applyVisitedChange(stop.stopid, stop.visited, stop.visitedAt);
       }
       // Catches any ridden-route changes missed while the socket was down.
-      setRiddenRoutes(routesMeta);
+      ingestRoutesMeta(routesMeta);
+      loadActivity();
       updateStats();
     })
     .catch((err) => console.error('Failed to resync stops', err));
@@ -264,10 +366,20 @@ function connectWebSocket() {
   ws.addEventListener('message', (event) => {
     const msg = JSON.parse(event.data);
     if (msg.type === 'visited-changed') {
-      applyVisitedChange(msg.stopid, msg.visited);
+      applyVisitedChange(msg.stopid, msg.visited, msg.visitedAt);
     } else if (msg.type === 'route-ridden-changed') {
-      if (msg.ridden) riddenRoutes.add(msg.shortName);
-      else riddenRoutes.delete(msg.shortName);
+      if (msg.ridden) {
+        riddenRouteAtByName.set(msg.shortName, msg.riddenAt);
+        pushActivityEvent({
+          type: 'route',
+          shortName: msg.shortName,
+          longName: routeLongNameByShortName.get(msg.shortName) || '',
+          at: msg.riddenAt || new Date().toISOString(),
+        });
+      } else {
+        riddenRouteAtByName.delete(msg.shortName);
+        dropActivityEvent((e) => e.type === 'route' && e.shortName === msg.shortName);
+      }
       updateStats();
     } else if (msg.type === 'hello') {
       myClientId = msg.clientId;
@@ -475,9 +587,10 @@ Promise.all([
   fetch('/api/routes-raw').then((res) => res.json()),
   fetch('/api/routes-meta').then((res) => res.json()),
 ]).then(([stops, routesGeoJson, routesRawGeoJson, routesMeta]) => {
-  setRiddenRoutes(routesMeta);
+  ingestRoutesMeta(routesMeta);
   renderStops(stops);
   setupStopsToggle();
+  setupActivity();
   setupRoutes(routesMeta, routesGeoJson, routesRawGeoJson);
   connectWebSocket();
   shareLocationOverWebSocket();

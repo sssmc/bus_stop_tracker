@@ -11,7 +11,8 @@ const {
   getAllStopsWithVisited,
   setVisited,
   stopExists,
-  getRiddenRouteNames,
+  getRiddenRoutes,
+  getRecentActivity,
   setRouteRidden,
 } = require('./db');
 const { parseStopsCsv } = require('./loadStopsCsv');
@@ -140,12 +141,27 @@ async function main() {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/routes-meta') {
-      const riddenRouteNames = getRiddenRouteNames(db);
+      const riddenAtByShortName = new Map(
+        getRiddenRoutes(db).map((r) => [r.shortName, r.riddenAt])
+      );
       const routesMeta = routesMetaBase.map((route) => ({
         ...route,
-        ridden: riddenRouteNames.has(route.shortName),
+        ridden: riddenAtByShortName.has(route.shortName),
+        riddenAt: riddenAtByShortName.get(route.shortName) || null,
       }));
       sendJson(res, 200, routesMeta);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/activity') {
+      const requested = Number(url.searchParams.get('limit')) || 50;
+      const limit = Math.min(Math.max(requested, 1), 200);
+      const events = getRecentActivity(db, limit).map((event) =>
+        event.type === 'route'
+          ? { ...event, longName: routeLongNameByShortName.get(event.shortName) || '' }
+          : event
+      );
+      sendJson(res, 200, events);
       return;
     }
 
