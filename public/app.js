@@ -58,31 +58,17 @@ function applyRouteZOrder(layer, zoom) {
   }
 }
 
-// How long a stop popup stays open after it's shown (on click, or reopened). Long
-// enough to read the scheduled departures; the visited-toggle colour change is
-// instant either way.
-const POPUP_LINGER_MS = 6000;
-
-// stopid -> Promise<departures[]>, cached for the session so reopening a popup is
-// instant and doesn't refetch.
-const departuresCache = new Map();
+const POPUP_AUTO_CLOSE_MS = 1200;
 
 const markersByStopId = new Map();
 
 // route short name -> ridden_at ISO string, for every route currently marked
 // ridden. Kept current from route-ridden-changed WebSocket events (the map page
 // has no ridden toggle of its own — those come from the list page). Feeds the
-// score, the "km ridden" stat, and the momentum figures. Its .size is the ridden
-// route count.
+// score and the momentum figures. Its .size is the ridden route count.
 const riddenRouteAtByName = new Map();
 // route short name -> long name, from /api/routes-meta, for the activity feed.
 const routeLongNameByShortName = new Map();
-// route short name -> length in km, from /api/routes-meta, for the "km ridden" stat.
-const routeKmByName = new Map();
-// route short name -> { tripsToday, firstDep, lastDep, night }, from
-// /api/routes-schedule. nightRouteNames is the subset flagged as night routes.
-const scheduleByRoute = new Map();
-const nightRouteNames = new Set();
 
 const ACTIVITY_LIMIT = 40;
 let activityEvents = [];
@@ -143,41 +129,23 @@ function updateStats() {
   const score = Score.compute(visitedCount, riddenRouteAtByName.size);
   const m = Activity.momentum(stopTimestamps, [...riddenRouteAtByName.values()]);
 
-  let kmRidden = 0;
-  let kmTotal = 0;
-  for (const [name, km] of routeKmByName) {
-    kmTotal += km;
-    if (riddenRouteAtByName.has(name)) kmRidden += km;
-  }
-
   document.getElementById('stats').textContent =
-    `${score} pts${Activity.momentumSummary(m)} · ${visitedCount} / ${total} visited · ${Math.round(kmRidden)} / ${Math.round(kmTotal)} km`;
+    `${score} pts${Activity.momentumSummary(m)} · ${visitedCount} / ${total} visited`;
 
-  updateAchievements(m.streakDays, kmRidden);
+  updateAchievements(m.streakDays);
 }
 
-// Rebuilds the ridden-route / long-name / length maps from a fresh /api/routes-meta.
+// Rebuilds the ridden-route and long-name maps from a fresh /api/routes-meta.
 function ingestRoutesMeta(routesMeta) {
   riddenRouteAtByName.clear();
   routeLongNameByShortName.clear();
-  routeKmByName.clear();
   for (const route of routesMeta) {
     routeLongNameByShortName.set(route.shortName, route.longName);
-    routeKmByName.set(route.shortName, route.lengthKm || 0);
     if (route.ridden) riddenRouteAtByName.set(route.shortName, route.riddenAt);
   }
 }
 
-function ingestSchedule(schedule) {
-  scheduleByRoute.clear();
-  nightRouteNames.clear();
-  for (const entry of schedule) {
-    scheduleByRoute.set(entry.shortName, entry);
-    if (entry.night) nightRouteNames.add(entry.shortName);
-  }
-}
-
-function updateAchievements(streakDays, kmRidden) {
+function updateAchievements(streakDays) {
   const stops = [];
   for (const marker of markersByStopId.values()) {
     stops.push({ visited: marker._visited, muni: marker._muni, routes: marker._routes });
@@ -185,9 +153,7 @@ function updateAchievements(streakDays, kmRidden) {
   const result = Achievements.evaluate({
     stops,
     riddenCount: riddenRouteAtByName.size,
-    kmRidden,
     streakDays,
-    nightRouteRidden: [...riddenRouteAtByName.keys()].some((name) => nightRouteNames.has(name)),
   });
   Achievements.renderBadges(document.getElementById('badges'), result, { compact: true });
 
@@ -249,19 +215,10 @@ function renderStops(stops) {
     marker._stopname = stop.stopname;
     marker._muni = stop.muni || '';
     marker._routes = stop.routes || [];
-    marker._stopid = stop.stopid;
-    marker.bindPopup(stopPopupHtml(marker));
+    marker.bindPopup(stop.stopname);
     marker.on('click', () => {
       toggleVisited(stop.stopid);
-      // Give the popup long enough to read the departures; the toggle feedback
-      // (colour change) is instant regardless.
-      clearTimeout(marker._popupTimer);
-      marker._popupTimer = setTimeout(() => marker.closePopup(), POPUP_LINGER_MS);
-    });
-    marker.on('popupopen', () => {
-      clearTimeout(marker._popupTimer);
-      marker._popupTimer = setTimeout(() => marker.closePopup(), POPUP_LINGER_MS);
-      fillDepartures(marker);
+      setTimeout(() => marker.closePopup(), POPUP_AUTO_CLOSE_MS);
     });
     marker.addTo(stopLayer);
     markersByStopId.set(stop.stopid, marker);
@@ -273,64 +230,6 @@ function renderStops(stops) {
   baseZoom = map.getZoom();
   map.on('zoomend', updateAllMarkerRadii);
   updateStats();
-}
-
-// --- Stop popups with scheduled departures --------------------------------
-
-function escapeHtml(str) {
-  return String(str).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-}
-
-function departuresHtml(departures) {
-  if (departures == null) return '<div class="stop-popup-departures">Departures unavailable</div>';
-  if (departures.length === 0) {
-    return '<div class="stop-popup-departures">No more buses today (scheduled)</div>';
-  }
-  return (
-    '<div class="stop-popup-departures"><div class="dep-head">Next buses (scheduled)</div>' +
-    departures
-      .map(
-        (d) =>
-          `<div class="dep-row"><span class="dep-time">${d.time}</span> ` +
-          `<span class="dep-route">#${escapeHtml(d.route)}</span> ` +
-          `<span class="dep-head-sign">${escapeHtml(d.headsign || '')}</span> ` +
-          `<span class="dep-in">${d.inMinutes <= 0 ? 'now' : d.inMinutes + ' min'}</span></div>`
-      )
-      .join('') +
-    '</div>'
-  );
-}
-
-// depSection: HTML for the departures block; defaults to a loading placeholder.
-function stopPopupHtml(marker, depSection) {
-  const routes = (marker._routes || []).join(', ');
-  return (
-    `<div class="stop-popup">` +
-    `<strong>${escapeHtml(marker._stopname || '')}</strong>` +
-    (routes ? `<div class="stop-popup-routes">Routes ${escapeHtml(routes)}</div>` : '') +
-    (depSection || '<div class="stop-popup-departures">Loading departures…</div>') +
-    `</div>`
-  );
-}
-
-function fillDepartures(marker) {
-  const stopid = marker._stopid;
-  if (!departuresCache.has(stopid)) {
-    departuresCache.set(
-      stopid,
-      fetch(`/api/stops/${stopid}/departures?limit=6`)
-        .then((res) => res.json())
-        .then((body) => body.departures || [])
-        .catch(() => null)
-    );
-  }
-  departuresCache.get(stopid).then((departures) => {
-    const popup = marker.getPopup();
-    // Only refresh if this stop's popup is still the one showing.
-    if (popup && popup.isOpen()) {
-      popup.setContent(stopPopupHtml(marker, departuresHtml(departures)));
-    }
-  });
 }
 
 function setupStopsToggle() {
@@ -681,15 +580,6 @@ function setupRoutes(routesMeta, bundledGeoJson, rawGeoJson) {
 
     item.append(checkbox, swatch, label);
 
-    const sched = scheduleByRoute.get(route.shortName);
-    if (sched && sched.tripsToday > 0) {
-      const badge = document.createElement('span');
-      badge.className = 'route-sched';
-      badge.textContent = `${sched.tripsToday}/day${sched.night ? ' 🌙' : ''}`;
-      badge.title = `${sched.firstDep}–${sched.lastDep} · ${sched.tripsToday} trips today`;
-      item.appendChild(badge);
-    }
-
     listEl.appendChild(item);
     checkboxes.push(checkbox);
   }
@@ -729,17 +619,12 @@ Promise.all([
   fetch('/api/routes').then((res) => res.json()),
   fetch('/api/routes-raw').then((res) => res.json()),
   fetch('/api/routes-meta').then((res) => res.json()),
-  fetch('/api/routes-schedule').then((res) => res.json()),
-]).then(([stops, routesGeoJson, routesRawGeoJson, routesMeta, schedule]) => {
+]).then(([stops, routesGeoJson, routesRawGeoJson, routesMeta]) => {
   ingestRoutesMeta(routesMeta);
-  ingestSchedule(schedule);
   renderStops(stops);
   setupStopsToggle();
   setupActivity();
   setupRoutes(routesMeta, routesGeoJson, routesRawGeoJson);
   connectWebSocket();
   shareLocationOverWebSocket();
-
-  // Handle for the browser console / e2e checks.
-  window.busStopTracker = { map, markersByStopId };
 });

@@ -9,16 +9,4 @@ const Score = {
   compute(visitedStopCount, riddenRouteCount) {
     return visitedStopCount * this.POINTS_PER_STOP + riddenRouteCount * this.POINTS_PER_ROUTE;
   },
-  // Kilometres of route ridden vs. the whole network. A separate progress stat —
-  // it does NOT feed compute(). routesMeta entries carry `lengthKm` and `ridden`.
-  kmSummary(routesMeta) {
-    let ridden = 0;
-    let total = 0;
-    for (const route of routesMeta) {
-      const km = route.lengthKm || 0;
-      total += km;
-      if (route.ridden) ridden += km;
-    }
-    return { ridden, total };
-  },
 };

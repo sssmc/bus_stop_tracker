@@ -135,69 +135,6 @@ html, body {
   text-overflow: ellipsis;
 }
 
-/* Route schedule badge (map sidebar + list-page group headings) */
-
-.route-sched {
-  flex-shrink: 0;
-  margin-left: 8px;
-  color: #777;
-  font-size: 11px;
-  font-weight: normal;
-  white-space: nowrap;
-}
-
-/* Stop popup with scheduled departures */
-
-.stop-popup strong {
-  display: block;
-  margin-bottom: 2px;
-}
-
-.stop-popup-routes {
-  color: #666;
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-
-.stop-popup-departures {
-  font-size: 12px;
-  min-width: 200px;
-}
-
-.dep-head {
-  font-weight: bold;
-  color: #444;
-  margin-bottom: 2px;
-}
-
-.dep-row {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-  padding: 1px 0;
-}
-
-.dep-time {
-  font-variant-numeric: tabular-nums;
-  font-weight: bold;
-}
-
-.dep-route {
-  color: #1565c0;
-}
-
-.dep-head-sign {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dep-in {
-  color: #666;
-  white-space: nowrap;
-}
-
 /* Recent-activity feed (shared markup on both pages) */
 
 #activity-list {

@@ -33,12 +33,9 @@ const Achievements = (() => {
       test: (s) => s.muniComplete.size >= 1,
     },
     { id: 'streak-7', name: 'Week Warrior', desc: 'Keep a 7-day visit streak', test: (s) => s.streakDays >= 7 },
-    { id: 'km-100', name: 'Road Warrior', desc: 'Ride 100 km of the network', test: (s) => s.kmRidden >= 100 },
-    { id: 'night-owl', name: 'Night Owl', desc: 'Ride a night route', test: (s) => s.nightRouteRidden },
   ];
 
-  // input: { stops: [{ visited, muni, routes:[shortName] }], riddenCount, kmRidden,
-  //          streakDays, nightRouteRidden }
+  // input: { stops: [{ visited, muni, routes:[shortName] }], riddenCount, streakDays }
   function evaluate(input) {
     const stops = input.stops || [];
     let visitedCount = 0;
@@ -73,9 +70,7 @@ const Achievements = (() => {
       visitedCount,
       totalStops: stops.length,
       riddenCount: input.riddenCount || 0,
-      kmRidden: input.kmRidden || 0,
       streakDays: input.streakDays || 0,
-      nightRouteRidden: Boolean(input.nightRouteRidden),
       routeComplete,
       muniComplete,
     };

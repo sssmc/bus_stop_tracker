@@ -4,7 +4,6 @@ let allStops = [];
 let allStopsById = new Map();
 let routesMeta = [];
 let routesMetaByShortName = new Map();
-let scheduleByRoute = new Map();
 const rowsByStopId = new Map();
 let routeGroups = []; // { wrapper, heading, baseTitle, stopIds }
 let riddenCheckboxByRoute = new Map();
@@ -102,16 +101,6 @@ function buildRouteGroup(title, stops, route) {
   heading.appendChild(headingText);
 
   if (route) {
-    const sched = scheduleByRoute.get(route.shortName);
-    if (sched && sched.tripsToday > 0) {
-      const badge = document.createElement('span');
-      badge.className = 'route-sched';
-      badge.textContent = `${sched.tripsToday} trips · ${sched.firstDep}–${sched.lastDep}${sched.night ? ' 🌙' : ''}`;
-      heading.appendChild(badge);
-    }
-  }
-
-  if (route) {
     const riddenLabel = document.createElement('label');
     riddenLabel.className = 'ridden-toggle';
     riddenLabel.title = 'Mark this route as ridden';
@@ -207,10 +196,9 @@ function updateStats(filteredCount) {
     allStops.map((s) => s.visitedAt),
     routesMeta.map((r) => r.riddenAt)
   );
-  const km = Score.kmSummary(routesMeta);
 
   document.getElementById('stats').textContent =
-    `${score} pts${Activity.momentumSummary(m)} · ${visitedCount} / ${total} visited (${percent}%)${showing} · ${riddenCount} / ${routeTotal} routes ridden · ${Math.round(km.ridden)} / ${Math.round(km.total)} km`;
+    `${score} pts${Activity.momentumSummary(m)} · ${visitedCount} / ${total} visited (${percent}%)${showing} · ${riddenCount} / ${routeTotal} routes ridden`;
 }
 
 // The municipality board and achievements only change when a stop or route is
@@ -221,9 +209,8 @@ function refreshProgress() {
     allStops.map((s) => s.visitedAt),
     routesMeta.map((r) => r.riddenAt)
   );
-  const km = Score.kmSummary(routesMeta);
   renderMuniBoard();
-  updateAchievements(m.streakDays, km.ridden);
+  updateAchievements(m.streakDays);
 }
 
 function renderMuniBoard() {
@@ -268,13 +255,11 @@ function renderMuniBoard() {
   }
 }
 
-function updateAchievements(streakDays, kmRidden) {
+function updateAchievements(streakDays) {
   const result = Achievements.evaluate({
     stops: allStops,
     riddenCount: routesMeta.filter((r) => r.ridden).length,
-    kmRidden,
     streakDays,
-    nightRouteRidden: routesMeta.some((r) => r.ridden && r.night),
   });
   Achievements.renderBadges(badgesEl, result, { compact: false });
 
@@ -391,15 +376,6 @@ function setRoutesMeta(meta) {
   routesMetaByShortName = new Map(meta.map((r) => [r.shortName, r]));
 }
 
-function setSchedule(schedule) {
-  scheduleByRoute = new Map(schedule.map((s) => [s.shortName, s]));
-  // Fold the night flag onto routesMeta so the Night Owl achievement can see it.
-  for (const route of routesMeta) {
-    const sched = scheduleByRoute.get(route.shortName);
-    route.night = Boolean(sched && sched.night);
-  }
-}
-
 function loadActivity() {
   return fetch(`/api/activity?limit=${ACTIVITY_LIMIT}`)
     .then((res) => res.json())
@@ -414,12 +390,10 @@ function resync() {
   Promise.all([
     fetch('/api/stops').then((res) => res.json()),
     fetch('/api/routes-meta').then((res) => res.json()),
-    fetch('/api/routes-schedule').then((res) => res.json()),
   ])
-    .then(([stops, meta, schedule]) => {
+    .then(([stops, meta]) => {
       setAllStops(stops);
       setRoutesMeta(meta);
-      setSchedule(schedule);
       render();
       refreshProgress();
       loadActivity();
@@ -461,11 +435,9 @@ document.getElementById('undo-last').addEventListener('click', (event) => {
 Promise.all([
   fetch('/api/stops').then((res) => res.json()),
   fetch('/api/routes-meta').then((res) => res.json()),
-  fetch('/api/routes-schedule').then((res) => res.json()),
-]).then(([stops, meta, schedule]) => {
+]).then(([stops, meta]) => {
   setAllStops(stops);
   setRoutesMeta(meta);
-  setSchedule(schedule);
   render();
   refreshProgress();
   loadActivity();
