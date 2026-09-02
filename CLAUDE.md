@@ -37,6 +37,9 @@ Then open **https://localhost:3000** (accept the self-signed-cert warning).
   `https://<your-ip>:3000` — that's the intended way to tick off stops from a
   phone while out riding.
 
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for hosting this on an internet-facing box
+(systemd service, self-signed TLS, GTFS auto-refresh, backups).
+
 ### Smoke test without a browser
 
 ```bash
@@ -50,7 +53,7 @@ Startup logs `Seeded N stops`, `Loaded and bundled N route shapes`, and
 
 ## Data
 
-- **`data.sqlite`** (gitignored, ~200 MB) — the live database. Schema is created
+- **`data.sqlite`** (gitignored, ~300 KB) — the live database. Schema is created
   on startup by `server/db.js`. Only `visited` and `ridden_routes` hold user
   state; `stops` is re-seeded from CSV every start. Deleting it loses your ticks;
   it is rebuilt empty on next launch.
