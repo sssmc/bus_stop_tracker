@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 #
-# Download the current BC Transit (Victoria) static GTFS feed, unpack it into a
-# fresh Data/<name>_gtfs_<timestamp>/ directory, prune old copies, and restart
-# the service so it adopts the new feed.
+# Download the current BC Transit (Victoria) static GTFS feed and unpack it into
+# a fresh Data/bctransit_gtfs_<timestamp>/ directory, pruning older copies.
 #
 # The server (server/gtfs.js:findGtfsDir) uses the newest sub-directory of Data/
 # that contains a stop_times.txt, so the directory name only needs to match the
-# *_gtfs_* glob.
+# *_gtfs_* glob. Restart the app afterwards to pick up the new feed.
 #
+# Intended to run inside the container:
+#   docker compose exec app scripts/refresh-gtfs.sh && docker compose restart app
 # Run once during setup, then weekly from cron (see deploy/cron.d.bst).
 
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/opt/bus_stop_tracker}"
+APP_DIR="${APP_DIR:-/app}"
 DATA_DIR="$APP_DIR/Data"
 GTFS_URL="${GTFS_URL:-https://bct.tmix.se/Tmix.Cap.TdExport.WebApi/gtfs/?operatorIds=48}"
-SERVICE="${SERVICE:-bus-stop-tracker}"
 KEEP="${KEEP:-2}"   # how many feed directories to retain
 
 stamp="$(date +%Y%m%d_%H%M%S)"
@@ -46,9 +46,4 @@ ls -1dt "$DATA_DIR"/*_gtfs_* 2>/dev/null | tail -n "+$((KEEP + 1))" | while read
   rm -rf "$old"
 done
 
-if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files "$SERVICE.service" >/dev/null 2>&1; then
-  echo "Restarting $SERVICE"
-  systemctl restart "$SERVICE"
-else
-  echo "systemd unit $SERVICE not found — skipping restart (restart it yourself to pick up the new feed)"
-fi
+echo "Done. Restart the app to load the new feed:  docker compose restart app"

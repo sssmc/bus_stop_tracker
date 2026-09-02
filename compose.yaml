@@ -1,0 +1,39 @@
+name: bus-stop-tracker
+
+services:
+  app:
+    build: .
+    image: bus-stop-tracker
+    restart: unless-stopped
+    # Loopback only: `tailscale serve --bg 3000` on the host re-exposes this on
+    # the tailnet as HTTPS. Nothing off-box can hit the container directly.
+    # For the self-signed-HTTPS alternative (see DEPLOYMENT.md), change this to
+    # "443:3000" and uncomment the certs volume below.
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      PORT: "3000"
+    volumes:
+      # transit data: CSV is seeded from the image on first run; the GTFS feed
+      # extract is added here by scripts/refresh-gtfs.sh
+      - gtfs:/app/Data
+      # data.sqlite (your visited/ridden state) — this is what you back up
+      - state:/data
+      # Only for the self-signed-HTTPS alternative. With `tailscale serve` the
+      # app speaks plain HTTP and TLS is terminated by Tailscale.
+      # - ./certs:/app/certs:ro
+    healthcheck:
+      # tries HTTPS first (self-signed alt), falls back to HTTP (tailscale serve)
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- --no-check-certificate https://127.0.0.1:3000/api/stops >/dev/null 2>&1
+          || wget -qO- http://127.0.0.1:3000/api/stops >/dev/null 2>&1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  gtfs:
+  state:

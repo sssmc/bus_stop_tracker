@@ -37,8 +37,9 @@ Then open **https://localhost:3000** (accept the self-signed-cert warning).
   `https://<your-ip>:3000` — that's the intended way to tick off stops from a
   phone while out riding.
 
-See **[DEPLOYMENT.md](DEPLOYMENT.md)** for hosting this on an internet-facing box
-(systemd service, self-signed TLS, GTFS auto-refresh, backups).
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for hosting this with Docker
+(`Dockerfile` + `compose.yaml`) behind Tailscale — `tailscale serve` for TLS,
+plus GTFS auto-refresh and backups.
 
 ### Smoke test without a browser
 

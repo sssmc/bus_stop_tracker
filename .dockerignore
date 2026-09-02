@@ -1,0 +1,27 @@
+# Build context trimming for the app image. The GTFS feed, the DB, and the TLS
+# material are supplied at runtime via volumes / bind mounts, never baked in.
+
+.git
+.github
+.claude
+.plans
+
+node_modules
+npm-debug.log*
+
+data.sqlite
+data.sqlite-journal
+*.sqlite-journal
+
+# GTFS feed extracts — huge, provided via the Data volume at runtime
+Data/*_gtfs_*/
+
+# unused-by-the-app extras that would only bloat the image
+Data/Victoria_Regional_Transit_System_routes/
+Data/Victoria_Regional_Transit_System_stops/
+Data/*.kml.txt
+
+# secret — bind-mounted read-only at runtime
+certs/
+
+backups/
