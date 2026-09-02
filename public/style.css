@@ -414,16 +414,25 @@ body.list-page {
   z-index: 10;
   display: flex;
   align-items: center;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 8px 14px;
   background: white;
   padding: 10px 14px;
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
 }
 
 #search {
-  flex: 0 1 260px;
+  /* min-width:0 lets the input shrink below its intrinsic width instead of
+     forcing the row wider than a narrow (mobile) viewport. */
+  flex: 1 1 160px;
+  min-width: 0;
+  max-width: 260px;
   padding: 5px 8px;
   font-size: 14px;
+}
+
+#list-controls #stats {
+  margin-left: 0;
 }
 
 #stop-list {
@@ -523,4 +532,72 @@ body.list-page {
 .empty-message {
   color: #888;
   padding: 20px 4px;
+}
+
+/* Narrow / mobile screens (matches MOBILE_BREAKPOINT_PX in app.js) */
+
+@media (max-width: 700px) {
+  /* Map page: the top control box becomes a full-width wrapping bar instead of a
+     right-anchored block that overran the zoom buttons and the ☰ route toggle.
+     The three things pinned to the top of the map then stagger below it:
+     row 1-2 = this bar, row 3 = zoom + route toggle, row 4 = activity panel. */
+  #controls {
+    left: 8px;
+    right: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  #stops-mode-label,
+  #controls #stats {
+    margin-left: 0;
+  }
+
+  #controls #stats {
+    flex-basis: 100%;
+  }
+
+  /* Push the zoom buttons and the routes sidebar below the taller top bar. */
+  .leaflet-top {
+    top: 88px;
+  }
+
+  #route-sidebar {
+    top: 88px;
+    /* Don't run the full height of the map — leave the bottom clear for the
+       activity sheet and the map attribution. The route list scrolls inside. */
+    bottom: auto;
+    max-height: calc(100vh - 150px);
+  }
+
+  #route-sidebar:not(.collapsed) {
+    width: calc(100vw - 68px);
+    max-width: 300px;
+  }
+
+  /* The activity panel moves from a top-right overlay (which sat on top of the
+     expanded routes list) to a compact bottom sheet, docked bottom-left so the
+     Leaflet attribution stays readable. It grows upward as it opens. */
+  #activity-sidebar {
+    top: auto;
+    bottom: 8px;
+    left: 8px;
+    right: auto;
+    width: auto;
+    max-width: calc(100vw - 110px);
+  }
+
+  #activity-sidebar #activity-list {
+    max-height: 32vh;
+  }
+
+  /* The compact badge strip is map-only chrome; the full list lives on the List
+     view page. Drop it on a phone-sized map so it doesn't crowd the bottom. */
+  body:not(.list-page) #badges.badges-strip {
+    display: none;
+  }
 }
