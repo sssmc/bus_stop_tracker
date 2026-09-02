@@ -11,7 +11,13 @@
   <div id="map"></div>
   <div id="controls">
     <a href="stops.html">List view</a>
-    <button id="toggle-stops" type="button">Hide stops</button>
+    <label id="stops-mode-label">Stops:
+      <select id="stops-mode">
+        <option value="all">All</option>
+        <option value="visible-routes">On visible routes</option>
+        <option value="none">None</option>
+      </select>
+    </label>
     <span id="stats"></span>
   </div>
   <div id="route-sidebar">

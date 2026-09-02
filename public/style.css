@@ -24,9 +24,12 @@ html, body {
   font-size: 14px;
 }
 
-#toggle-stops {
+#stops-mode-label {
   margin-left: 10px;
-  padding: 2px 8px;
+  color: #333;
+}
+
+#stops-mode {
   font-size: 13px;
   cursor: pointer;
 }

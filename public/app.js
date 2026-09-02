@@ -84,11 +84,20 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors',
 }).addTo(map);
 
-// All stop markers live in this group so the "Hide stops" button can pull them
-// off the map (and put them back) in one call. Marker state — visited colour,
-// radius, stats — keeps updating from WebSocket events while hidden, so toggling
-// back shows the current picture.
+// All visible stop markers live in this group. The "Stops" dropdown decides which
+// markers are members: every stop ('all'), only stops served by a currently-shown
+// route ('visible-routes'), or none ('none', the whole group comes off the map).
+// Marker state — visited colour, radius, stats — keeps updating from WebSocket
+// events even while a marker is hidden, so it shows the current picture when
+// re-added.
 const stopLayer = L.layerGroup().addTo(map);
+
+// Which stops the map shows: 'all' | 'visible-routes' | 'none'. Kept in sync with
+// the #stops-mode dropdown by setupStopsMode().
+let stopsMode = 'all';
+// Set by setupRoutes() once it owns the visible-route set; returns the Set of
+// route short names currently drawn, for the 'visible-routes' filter.
+let getVisibleRouteNames = () => new Set();
 
 function baseRadiusFor(visited) {
   const isMobile = window.innerWidth < MOBILE_BREAKPOINT_PX;
@@ -232,16 +241,41 @@ function renderStops(stops) {
   updateStats();
 }
 
-function setupStopsToggle() {
-  const btn = document.getElementById('toggle-stops');
-  btn.addEventListener('click', () => {
-    if (map.hasLayer(stopLayer)) {
-      map.removeLayer(stopLayer);
-      btn.textContent = 'Show stops';
-    } else {
-      stopLayer.addTo(map);
-      btn.textContent = 'Hide stops';
+// Reconciles stopLayer membership with the current stopsMode. Cheap to call on
+// every route toggle: it's one pass over the markers with a Set lookup, and the
+// canvas renderer coalesces the adds/removes into a single redraw.
+function applyStopVisibility() {
+  if (stopsMode === 'none') {
+    if (map.hasLayer(stopLayer)) map.removeLayer(stopLayer);
+    return;
+  }
+  if (!map.hasLayer(stopLayer)) stopLayer.addTo(map);
+
+  if (stopsMode === 'all') {
+    for (const marker of markersByStopId.values()) {
+      if (!stopLayer.hasLayer(marker)) stopLayer.addLayer(marker);
     }
+    return;
+  }
+
+  // 'visible-routes': show a stop only if one of its routes is currently drawn.
+  const visible = getVisibleRouteNames();
+  for (const marker of markersByStopId.values()) {
+    const onVisibleRoute = marker._routes.some((name) => visible.has(name));
+    if (onVisibleRoute && !stopLayer.hasLayer(marker)) {
+      stopLayer.addLayer(marker);
+    } else if (!onVisibleRoute && stopLayer.hasLayer(marker)) {
+      stopLayer.removeLayer(marker);
+    }
+  }
+}
+
+function setupStopsMode() {
+  const select = document.getElementById('stops-mode');
+  stopsMode = select.value;
+  select.addEventListener('change', () => {
+    stopsMode = select.value;
+    applyStopVisibility();
   });
 }
 
@@ -478,6 +512,9 @@ function setupRoutes(routesMeta, bundledGeoJson, rawGeoJson) {
   let currentLineLayers = [];
   let recomputeTimer = null;
 
+  // Let the 'visible-routes' stop filter read this set.
+  getVisibleRouteNames = () => visibleRoutes;
+
   function addRouteLine(route, latLngs, zoom) {
     const baseWeight = routeWeightForZoom(zoom);
     const layer = L.polyline(latLngs, {
@@ -503,6 +540,8 @@ function setupRoutes(routesMeta, bundledGeoJson, rawGeoJson) {
   function renderVisibleRoutes() {
     for (const layer of currentLineLayers) map.removeLayer(layer);
     currentLineLayers = [];
+    // Route visibility just changed, so refresh the stop filter if it depends on it.
+    if (stopsMode === 'visible-routes') applyStopVisibility();
     if (visibleRoutes.size === 0) return;
 
     const zoom = map.getZoom();
@@ -622,9 +661,11 @@ Promise.all([
 ]).then(([stops, routesGeoJson, routesRawGeoJson, routesMeta]) => {
   ingestRoutesMeta(routesMeta);
   renderStops(stops);
-  setupStopsToggle();
+  setupStopsMode();
   setupActivity();
   setupRoutes(routesMeta, routesGeoJson, routesRawGeoJson);
+  // Honour the dropdown if the browser restored a non-default value on reload.
+  applyStopVisibility();
   connectWebSocket();
   shareLocationOverWebSocket();
 });
